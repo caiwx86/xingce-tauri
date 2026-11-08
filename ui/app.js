@@ -1491,7 +1491,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.8.0 · 每日任务 · 专注学习 · 学习周报 · PK")
+          h("div", { class: "d" }, "0.9.0 · 内部数字键盘 · 每日任务 · 专注学习")
         )
       )
     ),
@@ -2444,6 +2444,99 @@ async function startFormulaPractice() {
   renderFormulaPracticeQ();
 }
 
+function numberPad(input, onSubmit) {
+  let locked = false;
+  const keys = [
+    ["7", "7"], ["8", "8"], ["9", "9"], ["⌫", "back"],
+    ["4", "4"], ["5", "5"], ["6", "6"], ["C", "clear"],
+    ["1", "1"], ["2", "2"], ["3", "3"], ["·", "."],
+    ["0", "0"], ["±", "neg"], ["确定", "ok"],
+  ];
+  const setValue = (v) => {
+    input.value = v;
+    input.classList.remove("bump");
+    void input.offsetWidth;
+    input.classList.add("bump");
+  };
+  const button = (label, key) =>
+    h(
+      "button",
+      {
+        class:
+          "key" +
+          (key === "0" ? " wide" : "") +
+          (key === "back" || key === "clear" || key === "neg" || key === "." ? " op" : "") +
+          (key === "ok" ? " confirm" : ""),
+        type: "button",
+        "data-key": key,
+        "aria-label":
+          key === "back" ? "删除" : key === "clear" ? "清空" : key === "neg" ? "正负号" : key === "ok" ? "确定" : label,
+        onclick: () => press(key),
+      },
+      label
+    );
+  const buttons = keys.map(([label, key]) => button(label, key));
+  const pad = h("div", { class: "keypad", role: "group", "aria-label": "数字键盘" }, buttons);
+
+  const press = (key) => {
+    if (locked) return;
+    const active = pad.querySelector(`.key[data-key="${key}"]`);
+    if (active) {
+      active.classList.add("pressed");
+      setTimeout(() => active.classList.remove("pressed"), 120);
+    }
+    if (navigator.vibrate) navigator.vibrate(8);
+    let v = input.value;
+    if (key === "ok") {
+      onSubmit();
+      return;
+    }
+    if (key === "back") v = v.slice(0, -1);
+    else if (key === "clear") v = "";
+    else if (key === "neg") v = v.startsWith("-") ? v.slice(1) : `-${v}`;
+    else if (key === ".") {
+      if (!v.includes(".")) v = (v === "" ? "0" : v) + ".";
+    } else if (/^\d$/.test(key)) {
+      if (v.replace("-", "").replace(".", "").length >= 12) return;
+      v = v === "0" ? key : v + key;
+    }
+    setValue(v);
+  };
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" || e.key === "Enter") return;
+    if (/^\d$/.test(e.key)) {
+      e.preventDefault();
+      press(e.key);
+    } else if (e.key === "." || e.key === "Decimal") {
+      e.preventDefault();
+      press(".");
+    } else if (e.key === "-" || e.key === "Subtract") {
+      e.preventDefault();
+      press("neg");
+    } else if (e.key === "Backspace" || e.key === "Delete") {
+      e.preventDefault();
+      press("back");
+    }
+  });
+
+  return {
+    node: pad,
+    setEnabled(enabled) {
+      locked = !enabled;
+      buttons.forEach((b) => (b.disabled = !enabled));
+      input.classList.toggle("pad-locked", !enabled);
+    },
+    shake() {
+      input.classList.remove("shake");
+      void input.offsetWidth;
+      input.classList.add("shake");
+      setTimeout(() => input.classList.remove("shake"), 360);
+      if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+    },
+  };
+}
+
 function renderFormulaPracticeQ() {
   const q = FP.qs[FP.i];
   const last = FP.i + 1 >= FP.qs.length;
@@ -2453,14 +2546,16 @@ function renderFormulaPracticeQ() {
   const input = h("input", {
     class: "ans",
     type: "text",
-    inputmode: "decimal",
+    readonly: true,
+    inputmode: "none",
     autocomplete: "off",
     autocapitalize: "off",
     spellcheck: "false",
     enterkeyhint: "done",
-    placeholder: "输入答案",
+    placeholder: "用下方数字键盘输入",
     "aria-label": "公式实操答案",
   });
+  const pad = numberPad(input, submitFormulaPractice);
   const fb = h("div", { class: "fb", "aria-live": "polite" });
   const submit = h("button", { class: "primary", type: "button", onclick: submitFormulaPractice }, "确定");
   const next = h(
@@ -2480,7 +2575,7 @@ function renderFormulaPracticeQ() {
     if (FP && FP.done && FP.ready) nextFormulaPractice();
     else if (FP && !FP.done) submitFormulaPractice();
   });
-  FP.ui = { input, fb, submit, next, q };
+  FP.ui = { input, pad, fb, submit, next, q };
 
   screen(
     h(
@@ -2515,10 +2610,11 @@ function renderFormulaPracticeQ() {
     h("span", { class: "tag" }, `公式实操 · ${q.title}`),
     h("div", { class: "big-q" }, q.text),
     input,
+    pad.node,
     fb,
     submit,
     next,
-    h("p", { class: "kbd-hint" }, "输入数字后按 Enter 提交，再按 Enter 下一题；Esc 退出")
+    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，确定/Enter 提交，Esc 退出")
   );
   requestAnimationFrame(() => input.focus());
 }
@@ -2528,6 +2624,7 @@ async function submitFormulaPractice() {
   const raw = normalizeAnswer(FP.ui.input.value);
   if (raw === "" || !Number.isFinite(Number(raw))) {
     toast("请输入数字");
+    FP.ui.pad.shake();
     FP.ui.input.focus();
     return;
   }
@@ -2536,6 +2633,8 @@ async function submitFormulaPractice() {
   const q = FP.ui.q;
   const correct = Math.abs(mine - q.answer) <= q.tol + 1e-9;
   FP.done = true;
+  FP.ui.pad.setEnabled(false);
+  FP.ui.input.classList.add(correct ? "good" : "bad");
   if (correct) {
     FP.right++;
     FP.ui.fb.textContent = "✓ 正确";
@@ -3123,14 +3222,16 @@ function renderDrillQ() {
   const input = h("input", {
     class: "ans",
     type: "text",
-    inputmode: "decimal",
+    readonly: true,
+    inputmode: "none",
     autocomplete: "off",
     autocapitalize: "off",
     spellcheck: "false",
     enterkeyhint: "done",
-    placeholder: "输入答案",
+    placeholder: "用下方数字键盘输入",
     "aria-label": "答案",
   });
+  const pad = numberPad(input, submitDrill);
   const fb = h("div", { class: "fb", "aria-live": "polite" });
   const ok = h("button", { class: "primary", type: "button", onclick: submitDrill }, "确定");
   const nextBtn = h("button", { class: "primary hidden", type: "button", onclick: nextDrill }, last ? "查看结果" : "下一题");
@@ -3145,7 +3246,7 @@ function renderDrillQ() {
     if (D.answered) nextDrill();
     else submitDrill();
   });
-  D.ui = { input, fb, ok, nextBtn, q };
+  D.ui = { input, pad, fb, ok, nextBtn, q };
 
   screen(
     h(
@@ -3169,10 +3270,11 @@ function renderDrillQ() {
     ),
     h("div", { class: "big-q" }, q.text),
     input,
+    pad.node,
     fb,
     ok,
     nextBtn,
-    h("p", { class: "kbd-hint" }, "Enter 提交 / 下一题，Esc 退出")
+    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，Enter 提交 / 下一题，Esc 退出")
   );
   requestAnimationFrame(() => input.focus());
   startClock();
@@ -3206,6 +3308,7 @@ function submitDrill() {
   const raw = normalizeAnswer(D.ui.input.value);
   if (raw === "" || !Number.isFinite(Number(raw))) {
     toast("请输入数字");
+    D.ui.pad.shake();
     D.ui.input.focus();
     return;
   }
@@ -3216,8 +3319,10 @@ function submitDrill() {
   D.spent += Math.max(0, Date.now() - D.qStart);
   D.ui.input.readOnly = true;
   D.ui.ok.classList.add("hidden");
+  D.ui.pad.setEnabled(false);
 
   if (Math.abs(mine - q.answer) <= q.tol + 1e-9) {
+    D.ui.input.classList.add("good");
     D.right++;
     D.combo++;
     D.ui.fb.textContent = "✓ 正确" + (D.combo >= 3 ? `  🔥${D.combo}连击` : "");
@@ -3229,6 +3334,7 @@ function submitDrill() {
     }, 550);
   } else {
     D.combo = 0;
+    D.ui.input.classList.add("bad");
     D.wrong.push({ text: q.text, ans: q.answer, mine: raw });
     D.ui.fb.textContent = `✗ 正确答案：${fmt(q.answer)}`;
     D.ui.fb.className = "fb bad";

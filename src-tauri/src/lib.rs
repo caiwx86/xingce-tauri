@@ -909,6 +909,15 @@ fn count_due<T: Ord>(map: &BTreeMap<T, ReviewState>, today: i64) -> usize {
     map.values().filter(|s| s.due <= today).count()
 }
 
+/// 答对（或已安排复习）后，在到期日前不再出现在普通练习中。
+fn review_cooling(review: &BTreeMap<u32, ReviewState>, id: u32, today: Option<i64>) -> bool {
+    today.is_some_and(|t| review.get(&id).is_some_and(|s| s.due > t))
+}
+
+fn on_cooldown(p: &Progress, id: u32, today: Option<i64>) -> bool {
+    review_cooling(&p.review, id, today)
+}
+
 /* ---------------- 数据结构 ---------------- */
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -1359,11 +1368,18 @@ fn list_categories(state: State<AppState>) -> Vec<CatInfo> {
         .collect()
 }
 
-fn daily_questions(qs: &[Question], today: &str) -> Vec<Question> {
+fn daily_questions(
+    qs: &[Question],
+    review: &BTreeMap<u32, ReviewState>,
+    today: &str,
+) -> Vec<Question> {
     // 以日期为种子，同一天题目固定；日期非法时退回固定种子。
     let seed = day_num(today).unwrap_or(0) as u64;
     let mut r = Rng::seeded(seed);
-    let mut idx: Vec<usize> = (0..qs.len()).collect();
+    let today_num = day_num(today);
+    let mut idx: Vec<usize> = (0..qs.len())
+        .filter(|&i| !today_num.is_some_and(|t| review.get(&qs[i].id).is_some_and(|s| s.due > t)))
+        .collect();
     for i in (1..idx.len()).rev() {
         let j = (r.next() % (i as u64 + 1)) as usize;
         idx.swap(i, j);
@@ -1417,8 +1433,20 @@ fn smart_review_questions(state: &AppState, today: &str) -> Vec<Question> {
 fn get_questions(state: State<AppState>, mode: String, today: Option<String>) -> Vec<Question> {
     match mode.as_str() {
         "智能复习" => smart_review_questions(&state, today.as_deref().unwrap_or("")),
-        "每日挑战" => daily_questions(&state.questions, today.as_deref().unwrap_or("")),
-        "全部" => state.questions.clone(),
+        "每日挑战" => {
+            let p = state.progress();
+            daily_questions(&state.questions, &p.review, today.as_deref().unwrap_or(""))
+        }
+        "全部" => {
+            let p = state.progress();
+            let today_num = today.as_deref().and_then(day_num);
+            state
+                .questions
+                .iter()
+                .filter(|q| !on_cooldown(&p, q.id, today_num))
+                .cloned()
+                .collect()
+        }
         "错题本" => {
             let p = state.progress();
             state
@@ -1428,12 +1456,16 @@ fn get_questions(state: State<AppState>, mode: String, today: Option<String>) ->
                 .cloned()
                 .collect()
         }
-        category => state
-            .questions
-            .iter()
-            .filter(|q| q.category == category)
-            .cloned()
-            .collect(),
+        category => {
+            let p = state.progress();
+            let today_num = today.as_deref().and_then(day_num);
+            state
+                .questions
+                .iter()
+                .filter(|q| q.category == category && !on_cooldown(&p, q.id, today_num))
+                .cloned()
+                .collect()
+        }
     }
 }
 
@@ -2313,7 +2345,11 @@ mod tests {
     #[test]
     fn builtin_question_bank_is_valid() {
         let qs = load_questions().expect("题库应通过校验");
-        assert!(qs.len() >= 40, "题库应不少于 40 题，当前 {}", qs.len());
+        assert_eq!(qs.len(), 500, "题库应为 500 题，当前 {}", qs.len());
+        for cat in CATS {
+            let n = qs.iter().filter(|q| q.category.as_str() == cat).count();
+            assert_eq!(n, 100, "{cat} 应为 100 题，当前 {n}");
+        }
     }
 
     #[test]
@@ -2329,6 +2365,17 @@ mod tests {
             assert!(!note.trim().is_empty(), "{id} 说明为空");
             assert!(!example.trim().is_empty(), "{id} 例子为空");
         }
+    }
+
+    #[test]
+    fn reviewed_questions_are_on_cooldown() {
+        let mut p = Progress::default();
+        let mut st = ReviewState::default();
+        update_review(&mut st, true, 100);
+        p.review.insert(1, st);
+        assert!(on_cooldown(&p, 1, Some(100)));
+        assert!(!on_cooldown(&p, 1, Some(101)));
+        assert!(!on_cooldown(&p, 2, Some(100)));
     }
 
     #[test]
@@ -2420,11 +2467,12 @@ mod tests {
     #[test]
     fn daily_selection_is_stable_per_day() {
         let qs: Vec<Question> = (1..=20).map(sample_question).collect();
-        let a: Vec<u32> = daily_questions(&qs, "2026-11-09")
+        let review = BTreeMap::new();
+        let a: Vec<u32> = daily_questions(&qs, &review, "2026-11-09")
             .iter()
             .map(|q| q.id)
             .collect();
-        let b: Vec<u32> = daily_questions(&qs, "2026-11-09")
+        let b: Vec<u32> = daily_questions(&qs, &review, "2026-11-09")
             .iter()
             .map(|q| q.id)
             .collect();

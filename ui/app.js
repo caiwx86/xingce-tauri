@@ -184,6 +184,10 @@ const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 const REMINDER_KEY = "xingce.reminder";
 const REMINDER_ID = 7102026;
+const REMINDER_COUNT = 30;
+const REMINDER_IDS = Array.from({ length: REMINDER_COUNT }, (_, i) => REMINDER_ID + i);
+const REMINDER_TEST_ID = REMINDER_ID + 1000;
+const REMINDER_CHANNEL = "daily-reminder";
 
 /* ---------------- 每日提醒 ---------------- */
 
@@ -225,55 +229,102 @@ async function tryPlugin(cmd, args = {}) {
 
 async function ensureNotificationPermission() {
   if (!IS_MOBILE) return false;
+
   const granted = await tryPlugin("is_permission_granted");
   if (granted === true) return true;
   if (granted === false) {
-    toast("通知权限已被拒绝，请到系统设置中开启");
+    toast("通知权限已被拒绝，请到系统设置中允许通知");
     return false;
   }
-  const state = await tryPlugin("request_permission");
-  const ok = state === "granted" || state === "Granted" || state === true;
-  if (!ok) toast("未获得通知权限");
-  return ok;
-}
 
-async function scheduleDailyReminder(hour, minute, quiet = false) {
-  await tryPlugin("cancel", { notifications: [REMINDER_ID] });
-  let channelId = null;
-  if (IS_ANDROID) {
-    try {
-      await invoke("plugin:notification|create_channel", {
-        id: "daily-reminder",
-        name: "每日提醒",
-        description: "每天提醒完成行测目标",
-        importance: 3,
-        visibility: 0,
-        lights: true,
-        vibration: true,
-      });
-      channelId = "daily-reminder";
-    } catch (err) {
-      console.warn("[notification:create_channel]", err);
+  const state = await tryPlugin("request_permission");
+  if (state === "granted" || state === "Granted" || state === true) return true;
+  if (state === "prompt-with-rationale") {
+    const retry = await tryPlugin("request_permission");
+    if (retry === "granted" || retry === "Granted" || retry === true) return true;
+  }
+
+  // 部分 WebView 会走浏览器通知权限，作为插件权限的兜底
+  if (typeof Notification !== "undefined") {
+    if (Notification.permission === "granted") return true;
+    if (Notification.permission !== "denied" && Notification.requestPermission) {
+      try {
+        const web = await Notification.requestPermission();
+        if (web === "granted") return true;
+      } catch {
+        // 继续走失败提示
+      }
     }
   }
-  const options = {
-    id: REMINDER_ID,
-    ...(channelId ? { channelId } : {}),
-    title: "行测刷题 · 每日提醒",
-    body: "今天的目标还没完成，来做几道题吧！",
-    schedule: {
-      interval: {
-        interval: { hour, minute },
-        allowWhileIdle: true,
+
+  toast("未获得通知权限，请到系统设置中允许通知");
+  return false;
+}
+
+async function ensureNotificationChannel() {
+  if (!IS_ANDROID) return null;
+  try {
+    await invoke("plugin:notification|create_channel", {
+      id: REMINDER_CHANNEL,
+      name: "每日提醒",
+      description: "每天提醒完成行测目标",
+      importance: 3,
+      visibility: 0,
+      lights: true,
+      vibration: true,
+    });
+    return REMINDER_CHANNEL;
+  } catch (err) {
+    console.warn("[notification:create_channel]", err);
+    return null;
+  }
+}
+
+function reminderDate(hour, minute, offset) {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+
+async function scheduleDailyReminder(hour, minute) {
+  // 先取消旧版单条 interval 提醒和本版所有提前排期的提醒
+  await tryPlugin("cancel", { notifications: REMINDER_IDS });
+  const channelId = await ensureNotificationChannel();
+
+  let scheduled = 0;
+  let lastError = null;
+  for (let i = 0; i < REMINDER_COUNT; i++) {
+    const options = {
+      id: REMINDER_ID + i,
+      ...(channelId ? { channelId } : {}),
+      title: "行测刷题 · 每日提醒",
+      body: "今天的目标还没完成，来做几道题吧！",
+      schedule: {
+        at: {
+          date: reminderDate(hour, minute, i).toISOString(),
+          repeating: false,
+          allowWhileIdle: true,
+        },
       },
-    },
-  };
-  if (quiet) await tryPlugin("notify", { options });
-  else await call("plugin:notification|notify", { options });
+    };
+    try {
+      await invoke("plugin:notification|notify", { options });
+      scheduled++;
+    } catch (err) {
+      lastError = err;
+      console.warn("[notification:schedule]", err);
+    }
+  }
+  if (!scheduled) throw lastError || new Error("系统未能创建提醒");
+  return scheduled;
 }
 
 async function cancelDailyReminder() {
-  await call("plugin:notification|cancel", { notifications: [REMINDER_ID] });
+  await tryPlugin("cancel", { notifications: REMINDER_IDS });
+  // 兜底清掉旧版本可能残留的单条提醒
+  await tryPlugin("cancel", {});
 }
 
 async function sendTestNotification() {
@@ -282,14 +333,20 @@ async function sendTestNotification() {
     return;
   }
   if (!(await ensureNotificationPermission())) return;
-  await call("plugin:notification|notify", {
-    options: {
-      id: REMINDER_ID + 1,
-      title: "行测刷题 · 测试提醒",
-      body: "提醒功能已生效，明天见！",
-    },
-  });
-  toast("已发送测试通知");
+  const channelId = await ensureNotificationChannel();
+  try {
+    await invoke("plugin:notification|notify", {
+      options: {
+        id: REMINDER_TEST_ID,
+        ...(channelId ? { channelId } : {}),
+        title: "行测刷题 · 测试提醒",
+        body: "提醒功能已生效，明天见！",
+      },
+    });
+    toast("已发送测试通知");
+  } catch (err) {
+    toast(`测试通知失败：${errText(err)}`);
+  }
 }
 
 async function syncReminderOnStart() {
@@ -298,9 +355,9 @@ async function syncReminderOnStart() {
   const granted = await tryPlugin("is_permission_granted");
   if (granted === true) {
     try {
-      await scheduleDailyReminder(r.hour, r.minute, true);
-    } catch {
-      // 后台同步失败时保持现有计划
+      await scheduleDailyReminder(r.hour, r.minute);
+    } catch (err) {
+      console.warn("[notification:sync]", err);
     }
   }
 }
@@ -746,22 +803,28 @@ function renderSettings() {
           return;
         }
         const next = { enabled: toggle.checked, hour, minute };
+        let scheduledCount = 0;
         if (next.enabled) {
-          if (!(await ensureNotificationPermission())) return;
+          if (!(await ensureNotificationPermission())) {
+            toggle.checked = readReminder().enabled;
+            return;
+          }
           try {
-            await scheduleDailyReminder(hour, minute);
-          } catch {
+            scheduledCount = await scheduleDailyReminder(hour, minute);
+          } catch (err) {
+            toggle.checked = readReminder().enabled;
+            toast(`提醒设置失败：${errText(err)}`);
             return;
           }
         } else {
-          try {
-            await cancelDailyReminder();
-          } catch {
-            return;
-          }
+          await cancelDailyReminder();
         }
         saveReminder(next);
-        toast(next.enabled ? `已设置每天 ${reminderText(next)} 提醒` : "已关闭每日提醒");
+        toast(
+          next.enabled
+            ? `已设置每天 ${reminderText(next)} 提醒（排期 ${scheduledCount} 天）`
+            : "已关闭每日提醒"
+        );
         renderSettings();
       },
     },
@@ -831,7 +894,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.5.0 · 80 道题库 · 21 类速算 · 43 个公式 · 12 位动物伙伴")
+          h("div", { class: "d" }, "0.6.0 · 500 道题库 · 21 类速算 · 43 个公式 · 12 位动物伙伴")
         )
       )
     ),
@@ -1017,13 +1080,9 @@ async function renderHistory() {
   const filtered = historyFilter === "wrong" ? items.filter((x) => !x.correct) : items;
   const historyItem = (item, idx) => {
     const your =
-      item.options[item.choice] != null
-        ? `${String.fromCharCode(65 + item.choice)}. ${item.options[item.choice]}`
-        : "未记录";
+      item.options[item.choice] != null ? item.options[item.choice] : "未记录";
     const answer =
-      item.options[item.answer] != null
-        ? `${String.fromCharCode(65 + item.answer)}. ${item.options[item.answer]}`
-        : "题目已移除";
+      item.options[item.answer] != null ? item.options[item.answer] : "题目已移除";
     return h(
       "details",
       { class: "review" + (item.correct ? " ok" : " bad") },
@@ -1817,6 +1876,13 @@ let formulaScope = "all";
 let historyFilter = "all";
 let trickMemorize = true;
 
+function shuffleOptions(qs) {
+  return qs.map((q) => ({
+    ...q,
+    order: shuffle(q.options.map((_, i) => i)),
+  }));
+}
+
 async function start(mode, opts = {}) {
   const token = newNav();
   let base;
@@ -1826,8 +1892,8 @@ async function start(mode, opts = {}) {
     return;
   }
   if (!navIsCurrent(token)) return;
-  const qs = (opts.shuffle ? shuffle(base) : base).slice(0, opts.limit || undefined);
-  if (!qs.length) {
+  const picked = (opts.shuffle ? shuffle(base) : base).slice(0, opts.limit || undefined);
+  if (!picked.length) {
     toast(
       mode === "错题本"
         ? "错题本是空的"
@@ -1840,6 +1906,7 @@ async function start(mode, opts = {}) {
   F = null;
   FC = null;
   FP = null;
+  const qs = shuffleOptions(picked);
   S = {
     mode,
     label: opts.label || mode,
@@ -1860,12 +1927,13 @@ function renderQ() {
   const last = S.i + 1 >= S.qs.length;
   S.done = false;
 
-  const opts = q.options.map((text, k) =>
+  const order = q.order || q.options.map((_, i) => i);
+  const opts = order.map((original, k) =>
     h(
       "button",
       { class: "opt", type: "button", onclick: () => choose(k) },
       h("b", {}, String.fromCharCode(65 + k)),
-      h("span", {}, text)
+      h("span", {}, q.options[original])
     )
   );
   const exp = h("div", { class: "exp hidden", "aria-live": "polite" });
@@ -1926,13 +1994,15 @@ async function choose(k) {
   const session = S;
   S.done = true;
   const q = S.ui.q;
+  const order = q.order || q.options.map((_, i) => i);
+  const originalChoice = order[k];
   S.ui.opts.forEach((b) => (b.disabled = true));
 
   let r;
   try {
     r = await call("submit_answer", {
       id: q.id,
-      choice: k,
+      choice: originalChoice,
       combo: S.combo,
       today: today(),
       mode: S.label || S.mode,
@@ -1949,12 +2019,13 @@ async function choose(k) {
   S.combo = r.combo;
   S.xp += Number(r.award?.xp) || 0;
   if (r.correct) S.right++;
-  S.log.push({ q, choice: k, correct: r.correct, answer: r.answer });
+  S.log.push({ q, choice: originalChoice, correct: r.correct, answer: r.answer });
 
+  const correctPos = order.indexOf(r.answer);
   S.ui.opts.forEach((b, j) => {
     b.disabled = true;
     b.classList.remove("ok", "bad");
-    if (j === r.answer) b.classList.add("ok");
+    if (j === correctPos) b.classList.add("ok");
     else if (j === k) b.classList.add("bad");
   });
   S.ui.combo.textContent = r.combo >= 2 ? `🔥 ${r.combo} 连击` : "";
@@ -1983,10 +2054,8 @@ async function choose(k) {
 function reviewItem(item, idx) {
   const { q, choice, correct } = item;
   const your =
-    choice >= 0 && choice < q.options.length
-      ? `${String.fromCharCode(65 + choice)}. ${q.options[choice]}`
-      : "未作答";
-  const ans = `${String.fromCharCode(65 + q.answer)}. ${q.options[q.answer]}`;
+    choice >= 0 && choice < q.options.length ? q.options[choice] : "未作答";
+  const ans = q.options[q.answer];
   return h(
     "details",
     { class: "review" + (correct ? " ok" : " bad"), open: !correct },

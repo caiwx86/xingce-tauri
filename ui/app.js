@@ -179,6 +179,7 @@ function scopeChips(onChange) {
 
 // 异步导航令牌：用户快速返回/切换页面时，丢弃已经过期的异步渲染结果
 let navToken = 0;
+let backTarget = null;
 let focusTimer = null;
 let pkTimer = null;
 function stopAuxTimers() {
@@ -191,8 +192,85 @@ function stopAuxTimers() {
     pkTimer = null;
   }
 }
+async function handleHardwareBack() {
+  if (backTarget) {
+    const target = backTarget;
+    backTarget = null;
+    target();
+    return;
+  }
+  if (FC) {
+    FC = null;
+    renderFormulaList();
+    return;
+  }
+  if (FP) {
+    FP = null;
+    renderFormulaList();
+    return;
+  }
+  if (F) {
+    F = null;
+    renderFormulaList();
+    return;
+  }
+  if (D) {
+    leaveDrill();
+    return;
+  }
+  if (S) {
+    S = null;
+    renderHome();
+    return;
+  }
+  if (PK) {
+    PK = null;
+    renderEfficiency();
+    return;
+  }
+  if (FOCUS) {
+    FOCUS = null;
+    renderEfficiency();
+    return;
+  }
+  const title = document.querySelector("h1")?.textContent || "";
+  if (title === "行测刷题") {
+    try {
+      if (window.__TAURI__?.app?.exit) await window.__TAURI__.app.exit(0);
+      else await invoke("plugin:app|exit", { code: 0 });
+    } catch {
+      // 桌面端或浏览器环境没有 app.exit
+    }
+    return;
+  }
+  if (title === "公式一览图") {
+    renderFormulaList();
+    return;
+  }
+  if (title === "速算技巧") {
+    renderDrillMenu();
+    return;
+  }
+  if (["专注学习", "学习周报", "学习搭子 PK", "PK 结果"].includes(title)) {
+    renderEfficiency();
+    return;
+  }
+  renderHome();
+}
+
+async function registerHardwareBack() {
+  const api = window.__TAURI__?.app;
+  if (!api?.onBackButtonPress) return;
+  try {
+    await api.onBackButtonPress(handleHardwareBack);
+  } catch {
+    // 桌面端没有 Android 返回键监听
+  }
+}
+
 const newNav = () => {
   ++navToken;
+  backTarget = null;
   stopAuxTimers();
   return navToken;
 };
@@ -1492,7 +1570,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.3 · 大按键 · 强反馈")
+          h("div", { class: "d" }, "0.9.4 · 反馈置顶 · 返回键导航")
         )
       )
     ),
@@ -2242,6 +2320,7 @@ function renderFormulaResult() {
   if (!F) return;
   const session = F;
   F = null;
+  backTarget = renderFormulaList;
   const total = session.qs.length;
   const right = session.right;
   const wrongs = session.log.filter((x) => !x.correct);
@@ -2394,6 +2473,7 @@ async function answerFormulaCard(known) {
 function renderFormulaCardResult() {
   const session = FC;
   FC = null;
+  backTarget = renderFormulaList;
   const total = session.cards.length;
   screen(
     h(
@@ -2627,8 +2707,8 @@ function renderFormulaPracticeQ() {
       "div",
       { class: "answer-dock" },
       input,
-      pad.node,
       fb,
+      pad.node,
       next
     )
   );
@@ -2688,6 +2768,7 @@ function finishFormulaPractice() {
   if (!FP) return;
   const session = FP;
   FP = null;
+  backTarget = renderFormulaList;
   const total = session.qs.length;
   const right = session.right;
   screen(
@@ -3289,8 +3370,8 @@ function renderDrillQ() {
       "div",
       { class: "answer-dock" },
       input,
-      pad.node,
       fb,
+      pad.node,
       nextBtn
     )
   );
@@ -3554,5 +3635,6 @@ if (!invoke) {
   );
 } else {
   renderHome();
+  registerHardwareBack();
   setTimeout(syncReminderOnStart, 1200);
 }

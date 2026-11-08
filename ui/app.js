@@ -468,8 +468,17 @@ function celebrate(a) {
   celebrating = celebrating
     .then(async () => {
       if (a.level_up) await celebrateModal("🎊", "升职啦！", `Lv.${a.level} · ${a.title}`);
-      for (const x of a.new_achv || []) {
+      const newAchv = a.new_achv || [];
+      if (newAchv.length === 1) {
+        const x = newAchv[0];
         await celebrateModal(x.icon, "解锁成就：" + x.name, x.desc);
+      } else if (newAchv.length > 1) {
+        await celebrateModal(
+          "🏅",
+          `解锁 ${newAchv.length} 个成就`,
+          newAchv.slice(0, 6).map((x) => x.name).join("、") +
+            (newAchv.length > 6 ? " 等" : "")
+        );
       }
       const newAnimals = a.new_animals || [];
       if (newAnimals.length === 1) {
@@ -570,6 +579,8 @@ async function renderHome() {
   F = null;
   FC = null;
   FP = null;
+  ACHV_CACHE = null;
+  ANIMAL_CACHE = null;
   formulaScope = "all";
 
   let cats, st, pf, formulas;
@@ -595,43 +606,38 @@ async function renderHome() {
   const done = catDone + drillDone;
   const right = catRight + drillRight;
   const wrongs = st.wrong?.length || 0;
-  const got = pf.achievements.filter((a) => a.unlocked).length;
+  const got = pf.achievement_count;
 
   const dailyNode = card(
     "📅 每日挑战",
-    pf.daily_done ? "今日已完成 ✓ 明天再来" : "5 道精选题 · 完成额外 +30 XP",
+    pf.daily_done ? "今日已完成 ✓" : "5 道题 · 额外 +30 XP",
     () => start("每日挑战"),
     pf.daily_done ? "" : "hot"
   );
   const smartNode = card(
     "🧠 智能复习",
-    `今日到期 ${pf.review_due} 题 · 新题 ${pf.new_questions} 题`,
+    `到期 ${pf.review_due} · 新题 ${pf.new_questions}`,
     () => start("智能复习"),
     pf.review_due > 0 ? "hot" : ""
   );
-  const quickNode = card("⚡ 快速练习", "随机 10 题 · 跨题型热身", () =>
+  const quickNode = card("⚡ 快速练习", "随机 10 题 · 热身", () =>
     start("全部", { limit: 10, shuffle: true, label: "快速练习" })
   );
 
-  const todayCandidates = [];
-  if (pf.review_due > 0) todayCandidates.push(smartNode);
-  if (!pf.daily_done) todayCandidates.push(dailyNode);
-  todayCandidates.push(quickNode);
-  if (pf.daily_done) todayCandidates.push(dailyNode);
-  const primaryToday = todayCandidates[0];
-  const secondaryToday = todayCandidates.slice(1, 3);
-  const secondaryBlock =
-    secondaryToday.length === 0
-      ? null
-      : secondaryToday.length === 1
-        ? h("div", { class: "list" }, secondaryToday)
-        : h("div", { class: "grid2" }, secondaryToday);
   const todayNote =
     pf.review_due > 0
       ? `先清 ${pf.review_due} 道到期复习`
       : pf.daily_done
         ? "今日任务已完成，随便练几题保持手感"
         : "完成 20 题即达标";
+
+  const formulaNode = card(
+    "🧠 公式背诵",
+    pf.formula_due
+      ? `${formulas.length} 个公式 · 待复习 ${pf.formula_due}`
+      : `${formulas.length} 个公式 · 背诵 · 实操`,
+    renderFormulaList
+  );
 
   screen(
     h(
@@ -662,69 +668,100 @@ async function renderHome() {
       h("span", {}, `错题 ${wrongs}`),
       h("span", {}, `待复习 ${pf.review_due}`)
     ),
-    h(
-      "div",
-      { class: "fact-card" },
-      h("div", { class: "fact-title" }, "🐾 今日小知识"),
-      h("p", {}, factOfDay())
-    ),
     section(
-      "今日",
+      "开始",
       todayNote,
-      h("div", { class: "list" }, primaryToday),
-      secondaryBlock
-    ),
-    section(
-      "专项训练",
-      "速算 · 公式",
       h(
         "div",
         { class: "grid2" },
-        card("🧮 计算训练", "21 类速算 · 14 个技巧", renderDrillMenu),
-        card(
-          "🧠 公式背诵",
-          pf.formula_due
-            ? `${formulas.length} 个公式 · 今日待复习 ${pf.formula_due} 个`
-            : `${formulas.length} 个公式 · 背诵 + 实操`,
-          renderFormulaList,
-          "hot"
-        )
+        smartNode,
+        dailyNode,
+        quickNode,
+        card("🧮 计算训练", "21 类速算 · 14 个技巧", renderDrillMenu)
       )
     ),
     section(
-      "题库练习",
-      `${totalQ} 题 · 五大分类`,
+      "学习",
+      "题库 · 公式 · 错题 · 复习",
       h(
         "div",
-        { class: "list" },
-        card("📚 全部题型", `${totalQ} 题 · 随机顺序`, () => start("全部"))
-      ),
-      h(
-        "div",
-        { class: "cat-chips" },
-        cats.map((c) => {
-          const s = st.stats?.[c.name] || { done: 0, right: 0 };
-          return h(
-            "button",
-            { class: "cat-chip", type: "button", onclick: () => start(c.name) },
-            h("b", {}, c.name),
-            h("span", {}, `${c.count} 题` + (s.done ? ` · ${pct(s.right, s.done)}` : ""))
-          );
-        })
+        { class: "grid2" },
+        card("📚 题库练习", `${totalQ} 题 · 五大分类`, renderLibrary),
+        formulaNode,
+        card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
+        card("📈 复习计划", "艾宾浩斯 · 未来 7 天", renderReviewPlan)
       )
     ),
     section(
       "我的",
-      "错题 · 伙伴 · 记录",
+      "伙伴 · 成就 · 记录",
       h(
         "div",
         { class: "grid2" },
-        card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
-        card("🏅 成就", `已解锁 ${got} / ${pf.achievements.length}`, renderAchv),
         card("🐾 动物乐园", `${pf.animal_count} / ${pf.animal_total} 位伙伴`, renderAnimals),
+        card("🏅 成就", `已解锁 ${got} / ${pf.achievement_total}`, renderAchv),
         card("📜 历史记录", `${pf.history_count} 条 · 最近答题`, renderHistory),
-        card("📈 复习计划", "艾宾浩斯曲线 · 未来 7 天预测", renderReviewPlan, "wide")
+        card("⚙️ 设置", "提醒 · 外观 · 数据", renderSettings)
       )
+    ),
+    h(
+      "div",
+      { class: "fact-card compact" },
+      h("div", { class: "fact-title" }, "🐾 今日小知识"),
+      h("p", {}, factOfDay())
+    )
+  );
+}
+
+async function renderLibrary() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let cats, st;
+  try {
+    [cats, st] = await Promise.all([call("list_categories"), call("get_stats")]);
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+  const total = cats.reduce((a, c) => a + c.count, 0);
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span", {}, `${total} 题`)
+    ),
+    h("h1", {}, "题库练习"),
+    h("p", { class: "sub" }, "按分类练习，或直接随机开始。"),
+    h(
+      "div",
+      { class: "list" },
+      card("📚 全部题型", `${total} 题 · 随机顺序`, () => start("全部"))
+    ),
+    h(
+      "div",
+      { class: "grid2" },
+      cats.map((c) => {
+        const s = st.stats?.[c.name] || { done: 0, right: 0 };
+        return card(
+          c.name,
+          `${c.count} 题` + (s.done ? ` · 正确率 ${pct(s.right, s.done)}` : ""),
+          () => start(c.name)
+        );
+      })
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
     )
   );
 }
@@ -894,7 +931,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.6.0 · 500 道题库 · 21 类速算 · 43 个公式 · 12 位动物伙伴")
+          h("div", { class: "d" }, "0.7.0 · 500 道题库 · 99 位动物 · 888 个成就")
         )
       )
     ),
@@ -968,6 +1005,42 @@ async function renderReviewPlan() {
   );
 }
 
+function makePager(page, total, size, setPage, rerender) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(0, page), pages - 1);
+  return h(
+    "div",
+    { class: "pager" },
+    h(
+      "button",
+      {
+        class: "chip",
+        type: "button",
+        disabled: current <= 0,
+        onclick: () => {
+          setPage(current - 1);
+          rerender();
+        },
+      },
+      "上一页"
+    ),
+    h("span", {}, `${current + 1} / ${pages}`),
+    h(
+      "button",
+      {
+        class: "chip",
+        type: "button",
+        disabled: current >= pages - 1,
+        onclick: () => {
+          setPage(current + 1);
+          rerender();
+        },
+      },
+      "下一页"
+    )
+  );
+}
+
 async function renderAchv() {
   const token = newNav();
   stopTimer();
@@ -976,32 +1049,86 @@ async function renderAchv() {
   F = null;
   FC = null;
   FP = null;
-  let pf;
-  try {
-    pf = await call("get_profile", { today: today() });
-  } catch (err) {
-    if (navIsCurrent(token)) renderError(err);
-    return;
+
+  if (!ACHV_CACHE) {
+    try {
+      ACHV_CACHE = await call("get_achievements");
+    } catch (err) {
+      if (navIsCurrent(token)) renderError(err);
+      return;
+    }
   }
   if (!navIsCurrent(token)) return;
-  const got = pf.achievements.filter((a) => a.unlocked).length;
+
+  const all = ACHV_CACHE;
+  const got = all.filter((a) => a.unlocked).length;
+  const groups = [...new Set(all.map((a) => a.group))];
+  const visible = achvFilter === "all" ? all : all.filter((a) => a.group === achvFilter);
+  const pages = Math.max(1, Math.ceil(visible.length / ACHV_PAGE_SIZE));
+  achvPage = Math.min(achvPage, pages - 1);
+  const slice = visible.slice(achvPage * ACHV_PAGE_SIZE, (achvPage + 1) * ACHV_PAGE_SIZE);
+
   screen(
-    h("div", { class: "bar" }, h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"), h("span")),
-    h("h1", {}, "成就"),
-    h("p", { class: "sub" }, `已解锁 ${got} / ${pf.achievements.length} · 最长连续打卡 ${pf.best_streak} 天`),
-    h("div", { class: "progress" }, h("i", { style: `width:${(got / pf.achievements.length) * 100}%` })),
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span")
+    ),
+    h("h1", {}, "成就墙"),
+    h("p", { class: "sub" }, `已解锁 ${got} / ${all.length} 个成就`),
+    h("div", { class: "progress" }, h("i", { style: `width:${(got / all.length) * 100}%` })),
+    h(
+      "div",
+      { class: "chips scope-chips" },
+      h(
+        "button",
+        {
+          class: "chip" + (achvFilter === "all" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            achvFilter = "all";
+            achvPage = 0;
+            renderAchv();
+          },
+        },
+        `全部 ${all.length}`
+      ),
+      groups.map((g) =>
+        h(
+          "button",
+          {
+            class: "chip" + (achvFilter === g ? " on" : ""),
+            type: "button",
+            onclick: () => {
+              achvFilter = g;
+              achvPage = 0;
+              renderAchv();
+            },
+          },
+          g
+        )
+      )
+    ),
     h(
       "div",
       { class: "agrid" },
-      pf.achievements.map((a) =>
+      slice.map((a) =>
         h(
           "div",
-          { class: "badge" + (a.unlocked ? "" : " locked") },
+          { class: "badge achv" + (a.unlocked ? "" : " locked") },
           h("div", { class: "bicon", "aria-hidden": "true" }, a.unlocked ? a.icon : "🔒"),
           h("div", { class: "bname" }, a.name),
+          h("div", { class: "bmeta" }, a.group),
           h("div", { class: "bdesc" }, a.desc)
         )
       )
+    ),
+    makePager(achvPage, visible.length, ACHV_PAGE_SIZE, (n) => (achvPage = n), renderAchv),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
     )
   );
 }
@@ -1015,15 +1142,28 @@ async function renderAnimals() {
   FC = null;
   FP = null;
 
-  let pf;
-  try {
-    pf = await call("get_profile", { today: today() });
-  } catch (err) {
-    if (navIsCurrent(token)) renderError(err);
-    return;
+  if (!ANIMAL_CACHE) {
+    try {
+      ANIMAL_CACHE = await call("get_profile", { today: today() });
+    } catch (err) {
+      if (navIsCurrent(token)) renderError(err);
+      return;
+    }
   }
   if (!navIsCurrent(token)) return;
-  const got = pf.animals.filter((a) => a.unlocked).length;
+
+  const pf = ANIMAL_CACHE;
+  const all = pf.animals;
+  const got = all.filter((a) => a.unlocked).length;
+  const visible =
+    animalFilter === "owned"
+      ? all.filter((a) => a.unlocked)
+      : animalFilter === "locked"
+        ? all.filter((a) => !a.unlocked)
+        : all;
+  const pages = Math.max(1, Math.ceil(visible.length / ANIMAL_PAGE_SIZE));
+  animalPage = Math.min(animalPage, pages - 1);
+  const slice = visible.slice(animalPage * ANIMAL_PAGE_SIZE, (animalPage + 1) * ANIMAL_PAGE_SIZE);
 
   screen(
     h(
@@ -1037,8 +1177,51 @@ async function renderAnimals() {
     h("div", { class: "progress" }, h("i", { style: `width:${(got / Math.max(1, pf.animal_total)) * 100}%` })),
     h(
       "div",
+      { class: "chips scope-chips" },
+      h(
+        "button",
+        {
+          class: "chip" + (animalFilter === "all" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            animalFilter = "all";
+            animalPage = 0;
+            renderAnimals();
+          },
+        },
+        `全部 ${all.length}`
+      ),
+      h(
+        "button",
+        {
+          class: "chip" + (animalFilter === "owned" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            animalFilter = "owned";
+            animalPage = 0;
+            renderAnimals();
+          },
+        },
+        `已收集 ${got}`
+      ),
+      h(
+        "button",
+        {
+          class: "chip" + (animalFilter === "locked" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            animalFilter = "locked";
+            animalPage = 0;
+            renderAnimals();
+          },
+        },
+        `未发现 ${all.length - got}`
+      )
+    ),
+    h(
+      "div",
       { class: "agrid" },
-      pf.animals.map((a) =>
+      slice.map((a) =>
         h(
           "div",
           { class: "badge animal" + (a.unlocked ? "" : " locked") },
@@ -1049,6 +1232,7 @@ async function renderAnimals() {
         )
       )
     ),
+    makePager(animalPage, visible.length, ANIMAL_PAGE_SIZE, (n) => (animalPage = n), renderAnimals),
     h(
       "div",
       { class: "actions" },
@@ -1875,6 +2059,14 @@ let memorizeFormulas = true;
 let formulaScope = "all";
 let historyFilter = "all";
 let trickMemorize = true;
+let achvFilter = "all";
+let achvPage = 0;
+let animalFilter = "all";
+let animalPage = 0;
+let ACHV_CACHE = null;
+let ANIMAL_CACHE = null;
+const ACHV_PAGE_SIZE = 18;
+const ANIMAL_PAGE_SIZE = 18;
 
 function shuffleOptions(qs) {
   return qs.map((q) => ({

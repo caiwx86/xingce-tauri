@@ -4,7 +4,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
+    sync::{Mutex, MutexGuard, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, State};
@@ -677,127 +677,622 @@ const TITLES: [&str; 12] = [
     "部长",
 ];
 
-/// (id, 图标， 名称， 说明)
-const ACHV: [(&str, &str, &str, &str); 13] = [
-    ("first", "🌱", "初出茅庐", "完成第一道题"),
-    ("ans100", "📚", "题海战术", "累计答题 100 道"),
-    ("ans500", "🏔️", "登堂入室", "累计答题 500 道"),
-    ("streak3", "🔥", "三日不辍", "连续打卡 3 天"),
-    ("streak7", "⚡", "七日之约", "连续打卡 7 天"),
-    ("streak30", "👑", "月度坚持", "连续打卡 30 天"),
-    ("combo10", "🎯", "连对达人", "连续答对 10 题"),
-    ("perfect", "🧮", "神算子", "计算训练 10 题以上全部答对"),
-    (
-        "fast",
-        "🚀",
-        "快如闪电",
-        "计算训练平均 ≤3 秒/题且正确率 ≥90%",
-    ),
-    ("goal", "✅", "今日达标", "完成一次每日目标"),
-    ("daily", "📅", "挑战者", "完成一次每日挑战"),
-    ("lvl5", "📈", "升职加薪", "升到 5 级"),
-    ("clean", "🧹", "错题清零", "清空错题本"),
+#[derive(Clone, Copy)]
+enum AnimalKind {
+    Answers,
+    Streak,
+    Level,
+    Drill,
+    Combo,
+    History,
+    Special(&'static str),
+}
+
+struct AnimalDef {
+    id: String,
+    icon: &'static str,
+    name: String,
+    desc: String,
+    hint: String,
+    rarity: &'static str,
+    kind: AnimalKind,
+    target: u32,
+}
+
+impl AnimalDef {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        id: &str,
+        icon: &'static str,
+        name: &str,
+        desc: &str,
+        hint: &str,
+        rarity: &'static str,
+        kind: AnimalKind,
+        target: u32,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            icon,
+            name: name.to_string(),
+            desc: desc.to_string(),
+            hint: hint.to_string(),
+            rarity,
+            kind,
+            target,
+        }
+    }
+}
+
+const EXTRA_ANIMALS: [(&'static str, &'static str); 87] = [
+    ("浣熊", "🦝"),
+    ("仓鼠", "🐹"),
+    ("小老鼠", "🐭"),
+    ("松鼠", "🐿️"),
+    ("刺猬", "🦔"),
+    ("蝙蝠", "🦇"),
+    ("棕熊", "🐻"),
+    ("北极熊", "🐻‍❄️"),
+    ("猴子", "🐒"),
+    ("大猩猩", "🦍"),
+    ("红毛猩猩", "🦧"),
+    ("大象", "🐘"),
+    ("河马", "🦛"),
+    ("犀牛", "🦏"),
+    ("骆驼", "🐪"),
+    ("长颈鹿", "🦒"),
+    ("袋鼠", "🦘"),
+    ("奶牛", "🐄"),
+    ("小猪", "🐖"),
+    ("绵羊", "🐏"),
+    ("山羊", "🐐"),
+    ("小鹿", "🦌"),
+    ("骏马", "🐎"),
+    ("斑马", "🦓"),
+    ("花豹", "🐆"),
+    ("黑猫", "🐈‍⬛"),
+    ("导盲犬", "🦮"),
+    ("贵宾犬", "🐩"),
+    ("狼", "🐺"),
+    ("服务犬", "🐕‍🦺"),
+    ("白兔", "🐇"),
+    ("田鼠", "🐁"),
+    ("河狸", "🦫"),
+    ("水獭", "🦦"),
+    ("树懒", "🦥"),
+    ("蜥蜴", "🦎"),
+    ("蛇", "🐍"),
+    ("乌龟", "🐢"),
+    ("鳄鱼", "🐊"),
+    ("树蛙", "🐸"),
+    ("章鱼", "🐙"),
+    ("鱿鱼", "🦑"),
+    ("虾", "🦐"),
+    ("螃蟹", "🦀"),
+    ("河豚", "🐡"),
+    ("热带鱼", "🐠"),
+    ("小鱼", "🐟"),
+    ("海豚", "🐬"),
+    ("鲸鱼", "🐳"),
+    ("鲨鱼", "🦈"),
+    ("蓝鲸", "🐋"),
+    ("海豹", "🦭"),
+    ("小企鹅", "🐧"),
+    ("老鹰", "🦅"),
+    ("猫头鹰", "🦉"),
+    ("鹦鹉", "🦜"),
+    ("孔雀", "🦚"),
+    ("天鹅", "🦢"),
+    ("火烈鸟", "🦩"),
+    ("白鸽", "🕊️"),
+    ("公鸡", "🐓"),
+    ("小鸡", "🐣"),
+    ("鸭子", "🦆"),
+    ("渡渡鸟", "🦤"),
+    ("蜜蜂", "🐝"),
+    ("蝴蝶", "🦋"),
+    ("瓢虫", "🐞"),
+    ("蚂蚁", "🐜"),
+    ("蜘蛛", "🕷️"),
+    ("蝎子", "🦂"),
+    ("蜗牛", "🐌"),
+    ("毛毛虫", "🐛"),
+    ("蟋蟀", "🦗"),
+    ("恐龙", "🦕"),
+    ("霸王龙", "🦖"),
+    ("水母", "🪼"),
+    ("珊瑚", "🪸"),
+    ("贝壳", "🐚"),
+    ("小马", "🐴"),
+    ("野猪", "🐗"),
+    ("驼鹿", "🫎"),
+    ("野牛", "🦬"),
+    ("小羊", "🐑"),
+    ("獾", "🦡"),
+    ("臭鼬", "🦨"),
+    ("火鸡", "🦃"),
+    ("凤凰", "🐦‍🔥"),
 ];
 
-/// (id, 图标, 名称, 说明, 解锁提示, 稀有度)
-const ANIMALS: [(&str, &str, &str, &str, &str, &str); 12] = [
-    (
-        "cat",
-        "🐱",
-        "小猫",
-        "喜欢趴在书页上陪你刷题。",
-        "完成第一道题",
-        "普通",
-    ),
-    (
-        "dog",
-        "🐶",
-        "小狗",
-        "每天提醒你按时打卡。",
-        "累计答题 30 道",
-        "普通",
-    ),
-    (
-        "rabbit",
-        "🐰",
-        "小兔",
-        "跳一跳，正确率更高。",
-        "累计答题 80 道",
-        "普通",
-    ),
-    (
-        "panda",
-        "🐼",
-        "熊猫",
-        "慢悠悠但很稳，适合打基础。",
-        "升到 3 级",
-        "稀有",
-    ),
-    (
-        "fox",
-        "🦊",
-        "狐狸",
-        "擅长资料分析的机灵鬼。",
-        "连续打卡 7 天",
-        "稀有",
-    ),
-    (
-        "koala",
-        "🐨",
-        "考拉",
-        "困了也要复习完再睡。",
-        "累计答题 150 道",
-        "稀有",
-    ),
-    (
-        "tiger",
-        "🐯",
-        "小老虎",
-        "连对 10 题就会啸一声。",
-        "连续答对 10 题",
-        "稀有",
-    ),
-    (
-        "lion",
-        "🦁",
-        "狮子",
-        "职级达到 8 级解锁。",
-        "升到 8 级",
-        "史诗",
-    ),
-    (
-        "frog",
-        "🐸",
-        "青蛙",
-        "完成每日挑战后跳出来。",
-        "完成一次每日挑战",
-        "稀有",
-    ),
-    (
-        "penguin",
-        "🐧",
-        "企鹅",
-        "连续打卡 30 天，南极也坚持。",
-        "连续打卡 30 天",
-        "史诗",
-    ),
-    (
-        "unicorn",
-        "🦄",
-        "独角兽",
-        "计算训练 10 题全对时出现。",
-        "计算训练 10 题以上全对",
-        "传说",
-    ),
-    (
-        "dragon",
-        "🐉",
-        "小龙",
-        "累计答题 500 道，传说伙伴。",
-        "累计答题 500 道",
-        "传说",
-    ),
-];
+fn build_animals() -> Vec<AnimalDef> {
+    let mut defs = vec![
+        AnimalDef::new(
+            "cat",
+            "🐱",
+            "小猫",
+            "喜欢趴在书页上陪你刷题。",
+            "完成第一道题",
+            "普通",
+            AnimalKind::Answers,
+            1,
+        ),
+        AnimalDef::new(
+            "dog",
+            "🐶",
+            "小狗",
+            "每天提醒你按时打卡。",
+            "累计答题 30 道",
+            "普通",
+            AnimalKind::Answers,
+            30,
+        ),
+        AnimalDef::new(
+            "rabbit",
+            "🐰",
+            "小兔",
+            "跳一跳，正确率更高。",
+            "累计答题 80 道",
+            "普通",
+            AnimalKind::Answers,
+            80,
+        ),
+        AnimalDef::new(
+            "panda",
+            "🐼",
+            "熊猫",
+            "慢悠悠但很稳，适合打基础。",
+            "升到 3 级",
+            "稀有",
+            AnimalKind::Level,
+            3,
+        ),
+        AnimalDef::new(
+            "fox",
+            "🦊",
+            "狐狸",
+            "擅长资料分析的机灵鬼。",
+            "连续打卡 7 天",
+            "稀有",
+            AnimalKind::Streak,
+            7,
+        ),
+        AnimalDef::new(
+            "koala",
+            "🐨",
+            "考拉",
+            "困了也要复习完再睡。",
+            "累计答题 150 道",
+            "稀有",
+            AnimalKind::Answers,
+            150,
+        ),
+        AnimalDef::new(
+            "tiger",
+            "🐯",
+            "小老虎",
+            "连对 10 题就会啸一声。",
+            "连续答对 10 题",
+            "稀有",
+            AnimalKind::Combo,
+            10,
+        ),
+        AnimalDef::new(
+            "lion",
+            "🦁",
+            "狮子",
+            "职级达到 8 级解锁。",
+            "升到 8 级",
+            "史诗",
+            AnimalKind::Level,
+            8,
+        ),
+        AnimalDef::new(
+            "frog",
+            "🐸",
+            "青蛙",
+            "完成每日挑战后跳出来。",
+            "完成一次每日挑战",
+            "稀有",
+            AnimalKind::Special("daily"),
+            1,
+        ),
+        AnimalDef::new(
+            "penguin",
+            "🐧",
+            "企鹅",
+            "连续打卡 30 天，南极也坚持。",
+            "连续打卡 30 天",
+            "史诗",
+            AnimalKind::Streak,
+            30,
+        ),
+        AnimalDef::new(
+            "unicorn",
+            "🦄",
+            "独角兽",
+            "计算训练 10 题全对时出现。",
+            "计算训练 10 题以上全对",
+            "传说",
+            AnimalKind::Special("perfect"),
+            1,
+        ),
+        AnimalDef::new(
+            "dragon",
+            "🐉",
+            "小龙",
+            "累计答题 500 道，传说伙伴。",
+            "累计答题 500 道",
+            "传说",
+            AnimalKind::Answers,
+            500,
+        ),
+    ];
+
+    let mut conditions = Vec::new();
+    for n in 1..=18u32 {
+        conditions.push((AnimalKind::Answers, n * 20));
+    }
+    for n in 1..=18u32 {
+        conditions.push((AnimalKind::Streak, n * 3));
+    }
+    for n in 1..=18u32 {
+        conditions.push((AnimalKind::Level, 2 + (n - 1) % 11));
+    }
+    for n in 1..=18u32 {
+        conditions.push((AnimalKind::Drill, n * 10));
+    }
+    for n in 1..=15u32 {
+        conditions.push((AnimalKind::History, n * 20));
+    }
+    debug_assert_eq!(conditions.len(), EXTRA_ANIMALS.len());
+
+    for (i, ((name, icon), (kind, target))) in
+        EXTRA_ANIMALS.iter().zip(conditions.into_iter()).enumerate()
+    {
+        let (hint, desc) = match kind {
+            AnimalKind::Answers => (
+                format!("累计答题 {target} 道"),
+                format!("在题海里遇到的小家伙，陪你累计答题 {target} 道。"),
+            ),
+            AnimalKind::Streak => (
+                format!("连续打卡 {target} 天"),
+                format!("连续打卡 {target} 天后，它悄悄来到你身边。"),
+            ),
+            AnimalKind::Level => (
+                format!("升到 {target} 级"),
+                format!("升到 Lv.{target} 时，它从书页后探出头。"),
+            ),
+            AnimalKind::Drill => (
+                format!("计算训练累计 {target} 题"),
+                format!("计算训练累计 {target} 题后，它被你的手速吸引。"),
+            ),
+            AnimalKind::History => (
+                format!("答题记录 {target} 条"),
+                format!("答题记录达到 {target} 条时，它翻着你的成长档案。"),
+            ),
+            _ => (String::new(), String::new()),
+        };
+        let rarity = match i {
+            0..=29 => "普通",
+            30..=59 => "稀有",
+            60..=84 => "史诗",
+            _ => "传说",
+        };
+        defs.push(AnimalDef::new(
+            &format!("pet-{}", i + 13),
+            icon,
+            name,
+            &desc,
+            &hint,
+            rarity,
+            kind,
+            target,
+        ));
+    }
+    defs
+}
+
+fn animal_defs() -> &'static Vec<AnimalDef> {
+    static DEFS: OnceLock<Vec<AnimalDef>> = OnceLock::new();
+    DEFS.get_or_init(build_animals)
+}
+
+fn animal_unlocked_def(def: &AnimalDef, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
+    match def.kind {
+        AnimalKind::Answers => total >= def.target,
+        AnimalKind::Streak => p.best_streak >= def.target,
+        AnimalKind::Level => level >= def.target,
+        AnimalKind::Drill => p.drill.values().map(|s| s.done).sum::<u32>() >= def.target,
+        AnimalKind::Combo => ev.combo >= def.target,
+        AnimalKind::History => p.history.len() as u32 >= def.target,
+        AnimalKind::Special("daily") => !p.daily_done.is_empty(),
+        AnimalKind::Special("perfect") => ev.drill.is_some_and(|(t, r, _)| t >= 10 && r == t),
+        AnimalKind::Special(_) => false,
+    }
+}
+
+/// 兼容按 id 查询解锁状态（测试和旧逻辑使用）
+fn animal_unlocked(id: &str, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
+    animal_defs()
+        .iter()
+        .find(|d| d.id.as_str() == id)
+        .is_some_and(|d| animal_unlocked_def(d, p, total, level, ev))
+}
+
+#[derive(Clone)]
+enum AchvKind {
+    Answers,
+    Correct,
+    Streak,
+    Combo,
+    Level,
+    Category(&'static str),
+    Drill(&'static str),
+    History,
+    Animal(String),
+    Special(&'static str),
+}
+
+struct AchvDef {
+    id: String,
+    icon: &'static str,
+    name: String,
+    desc: String,
+    group: &'static str,
+    kind: AchvKind,
+    target: u32,
+}
+
+impl AchvDef {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        id: &str,
+        icon: &'static str,
+        name: &str,
+        desc: &str,
+        group: &'static str,
+        kind: AchvKind,
+        target: u32,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            icon,
+            name: name.to_string(),
+            desc: desc.to_string(),
+            group,
+            kind,
+            target,
+        }
+    }
+}
+
+fn build_achievements() -> Vec<AchvDef> {
+    let mut defs = Vec::with_capacity(888);
+    for n in 1..=120u32 {
+        let target = n * 10;
+        defs.push(AchvDef::new(
+            &format!("ans-{target}"),
+            "📝",
+            &format!("答题里程碑 · {target}"),
+            &format!("累计答题 {target} 道"),
+            "答题",
+            AchvKind::Answers,
+            target,
+        ));
+    }
+    for n in 1..=120u32 {
+        let target = n * 10;
+        defs.push(AchvDef::new(
+            &format!("right-{target}"),
+            "🎯",
+            &format!("命中里程碑 · {target}"),
+            &format!("累计答对 {target} 道"),
+            "正确",
+            AchvKind::Correct,
+            target,
+        ));
+    }
+    for n in 1..=100u32 {
+        defs.push(AchvDef::new(
+            &format!("streak-{n}"),
+            "🔥",
+            &format!("连续 {n} 天"),
+            &format!("连续打卡 {n} 天"),
+            "连续",
+            AchvKind::Streak,
+            n,
+        ));
+    }
+    for n in 1..=60u32 {
+        defs.push(AchvDef::new(
+            &format!("combo-{n}"),
+            "⚡",
+            &format!("{n} 连击"),
+            &format!("单次连续答对 {n} 题"),
+            "连击",
+            AchvKind::Combo,
+            n,
+        ));
+    }
+    for n in 1..=12u32 {
+        defs.push(AchvDef::new(
+            &format!("level-{n}"),
+            "🏅",
+            &format!("Lv.{n} 职级"),
+            &format!("职级达到 Lv.{n}"),
+            "等级",
+            AchvKind::Level,
+            n,
+        ));
+    }
+    let cats: [(&'static str, &'static str); 5] = [
+        ("言语理解", "📖"),
+        ("数量关系", "🧮"),
+        ("判断推理", "🧩"),
+        ("资料分析", "📊"),
+        ("常识判断", "🌍"),
+    ];
+    for (ci, (cat, icon)) in cats.iter().enumerate() {
+        for n in 1..=24u32 {
+            let target = n * 5;
+            defs.push(AchvDef::new(
+                &format!("cat-{ci}-{n}"),
+                icon,
+                &format!("{cat} · {target} 题"),
+                &format!("{cat}累计完成 {target} 题"),
+                "分类",
+                AchvKind::Category(*cat),
+                target,
+            ));
+        }
+    }
+    for (di, (kind, _, _)) in DRILLS.iter().enumerate() {
+        for n in 1..=10u32 {
+            let target = n * 5;
+            defs.push(AchvDef::new(
+                &format!("drill-{di}-{n}"),
+                "🧮",
+                &format!("{kind} · {target} 题"),
+                &format!("{kind}累计完成 {target} 题"),
+                "训练",
+                AchvKind::Drill(*kind),
+                target,
+            ));
+        }
+    }
+    for n in 1..=37u32 {
+        let target = n * 10;
+        defs.push(AchvDef::new(
+            &format!("history-{n}"),
+            "📜",
+            &format!("记录 · {target} 条"),
+            &format!("答题记录达到 {target} 条"),
+            "记录",
+            AchvKind::History,
+            target,
+        ));
+    }
+    for a in animal_defs() {
+        defs.push(AchvDef::new(
+            &format!("animal-{}", a.id),
+            a.icon,
+            &format!("伙伴 · {}", a.name),
+            &format!("与{}相遇", a.name),
+            "动物",
+            AchvKind::Animal(a.id.clone()),
+            1,
+        ));
+    }
+    let specials: [(&'static str, &'static str, &'static str, &'static str); 10] = [
+        ("first", "🌱", "初出茅庐", "完成第一道题"),
+        ("daily", "📅", "挑战者", "完成一次每日挑战"),
+        ("clean", "🧹", "错题清零", "清空错题本"),
+        ("perfect", "🧮", "神算子", "计算训练 10 题以上全部答对"),
+        (
+            "fast",
+            "🚀",
+            "快如闪电",
+            "计算训练平均 ≤3 秒/题且正确率 ≥90%",
+        ),
+        ("goal", "✅", "今日达标", "完成一次每日目标"),
+        ("lvl5", "📈", "升职加薪", "升到 5 级"),
+        ("combo20", "🎯", "连对达人", "连续答对 20 题"),
+        ("animals50", "🐾", "动物之友", "收集 50 位动物伙伴"),
+        ("history100", "📜", "记录收藏家", "答题记录达到 100 条"),
+    ];
+    for (id, icon, name, desc) in specials {
+        defs.push(AchvDef::new(
+            &format!("special-{id}"),
+            icon,
+            name,
+            desc,
+            "特殊",
+            AchvKind::Special(id),
+            1,
+        ));
+    }
+    defs
+}
+
+fn achievement_defs() -> &'static Vec<AchvDef> {
+    static DEFS: OnceLock<Vec<AchvDef>> = OnceLock::new();
+    DEFS.get_or_init(build_achievements)
+}
+
+fn correct_total(p: &Progress) -> u32 {
+    let answers = p.stats.values().map(|s| s.right).sum::<u32>();
+    let drills = p.drill.values().map(|s| s.right).sum::<u32>();
+    answers.saturating_add(drills)
+}
+
+fn special_unlocked(id: &str, p: &Progress, level: u32, ev: &Event) -> bool {
+    match id {
+        "first" => !p.stats.is_empty() || !p.drill.is_empty(),
+        "daily" => !p.daily_done.is_empty(),
+        "clean" => ev.cleared,
+        "perfect" => ev.drill.is_some_and(|(t, r, _)| t >= 10 && r == t),
+        "fast" => ev
+            .drill
+            .is_some_and(|(t, r, s)| t >= 10 && r * 10 >= t * 9 && s / t as f64 <= 3.0),
+        "goal" => !p.goal_hit.is_empty(),
+        "lvl5" => level >= 5,
+        "combo20" => ev.combo >= 20,
+        "animals50" => {
+            animal_defs()
+                .iter()
+                .filter(|d| p.animals.contains(&d.id))
+                .count()
+                >= 50
+        }
+        "history100" => p.history.len() >= 100,
+        _ => false,
+    }
+}
+
+fn achv_unlocked(def: &AchvDef, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
+    match &def.kind {
+        AchvKind::Answers => total >= def.target,
+        AchvKind::Correct => correct_total(p) >= def.target,
+        AchvKind::Streak => p.best_streak >= def.target,
+        AchvKind::Combo => ev.combo >= def.target,
+        AchvKind::Level => level >= def.target,
+        AchvKind::Category(cat) => p.stats.get(*cat).map(|s| s.done).unwrap_or(0) >= def.target,
+        AchvKind::Drill(kind) => p.drill.get(*kind).map(|s| s.done).unwrap_or(0) >= def.target,
+        AchvKind::History => p.history.len() as u32 >= def.target,
+        AchvKind::Animal(id) => p.animals.contains(id.as_str()),
+        AchvKind::Special(id) => special_unlocked(*id, p, level, ev),
+    }
+}
+
+fn evaluate_achievements(p: &mut Progress, total: u32, level: u32, ev: &Event) -> Vec<AchvInfo> {
+    let mut out = Vec::new();
+    for def in achievement_defs() {
+        if p.achv.contains(&def.id) {
+            continue;
+        }
+        if achv_unlocked(def, p, total, level, ev) {
+            p.achv.insert(def.id.clone());
+            out.push(AchvInfo {
+                id: def.id.clone(),
+                icon: def.icon,
+                name: def.name.clone(),
+                desc: def.desc.clone(),
+                group: def.group,
+            });
+        }
+    }
+    out
+}
 
 fn level_of(xp: u32) -> u32 {
     let mut l = 1u32;
@@ -1125,20 +1620,21 @@ fn load_questions() -> Result<Vec<Question>, String> {
 
 #[derive(Serialize, Clone)]
 struct AnimalInfo {
-    id: &'static str,
+    id: String,
     icon: &'static str,
-    name: &'static str,
-    desc: &'static str,
-    hint: &'static str,
+    name: String,
+    desc: String,
+    hint: String,
     rarity: &'static str,
 }
 
 #[derive(Serialize, Clone)]
 struct AchvInfo {
-    id: &'static str,
+    id: String,
     icon: &'static str,
-    name: &'static str,
-    desc: &'static str,
+    name: String,
+    desc: String,
+    group: &'static str,
 }
 
 #[derive(Serialize, Default)]
@@ -1160,24 +1656,6 @@ struct Event {
     combo: u32,
     drill: Option<(u32, u32, f64)>, // (题数， 答对数， 用时秒)
     cleared: bool,
-    unlock: Option<&'static str>,
-}
-
-fn achv_info(id: &str) -> Option<AchvInfo> {
-    ACHV.iter()
-        .find(|a| a.0 == id)
-        .map(|&(id, icon, name, desc)| AchvInfo {
-            id,
-            icon,
-            name,
-            desc,
-        })
-}
-
-fn unlock(p: &mut Progress, ids: &mut Vec<&'static str>, id: &'static str) {
-    if p.achv.insert(id.to_string()) {
-        ids.push(id);
-    }
 }
 
 /// 当天首次活动时更新连续打卡；日期变化时重置今日计数
@@ -1228,24 +1706,6 @@ fn live_streak(p: &Progress, today: &str) -> u32 {
     }
 }
 
-fn animal_unlocked(id: &str, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
-    match id {
-        "cat" => total >= 1,
-        "dog" => total >= 30,
-        "rabbit" => total >= 80,
-        "panda" => level >= 3,
-        "fox" => p.best_streak >= 7,
-        "koala" => total >= 150,
-        "tiger" => ev.combo >= 10,
-        "lion" => level >= 8,
-        "frog" => !p.daily_done.is_empty(),
-        "penguin" => p.best_streak >= 30,
-        "unicorn" => ev.drill.is_some_and(|(t, r, _)| t >= 10 && r == t),
-        "dragon" => total >= 500,
-        _ => false,
-    }
-}
-
 /// 结算一次事件：经验、等级、每日目标、连续打卡、成就
 fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
     touch(p, today);
@@ -1267,63 +1727,22 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
         .values()
         .fold(0u32, |a, s| a.saturating_add(s.done))
         .saturating_add(p.drill.values().fold(0u32, |a, s| a.saturating_add(s.done)));
-    let mut ids: Vec<&'static str> = Vec::new();
-    if total >= 1 {
-        unlock(p, &mut ids, "first");
-    }
-    if total >= 100 {
-        unlock(p, &mut ids, "ans100");
-    }
-    if total >= 500 {
-        unlock(p, &mut ids, "ans500");
-    }
-    if p.streak >= 3 {
-        unlock(p, &mut ids, "streak3");
-    }
-    if p.streak >= 7 {
-        unlock(p, &mut ids, "streak7");
-    }
-    if p.streak >= 30 {
-        unlock(p, &mut ids, "streak30");
-    }
-    if ev.combo >= 10 {
-        unlock(p, &mut ids, "combo10");
-    }
-    if let Some((t, r, secs)) = ev.drill {
-        if t >= 10 && r == t {
-            unlock(p, &mut ids, "perfect");
-        }
-        if t >= 10 && r * 10 >= t * 9 && secs / t as f64 <= 3.0 {
-            unlock(p, &mut ids, "fast");
-        }
-    }
-    if p.goal_hit == today {
-        unlock(p, &mut ids, "goal");
-    }
-    if level >= 5 {
-        unlock(p, &mut ids, "lvl5");
-    }
-    if ev.cleared {
-        unlock(p, &mut ids, "clean");
-    }
-    if let Some(id) = ev.unlock {
-        unlock(p, &mut ids, id);
-    }
-
     let mut new_animals = Vec::new();
-    for &(id, icon, name, desc, hint, rarity) in ANIMALS.iter() {
-        if !p.animals.contains(id) && animal_unlocked(id, p, total, level, &ev) {
-            p.animals.insert(id.to_string());
+    for def in animal_defs() {
+        if !p.animals.contains(&def.id) && animal_unlocked_def(def, p, total, level, &ev) {
+            p.animals.insert(def.id.clone());
             new_animals.push(AnimalInfo {
-                id,
-                icon,
-                name,
-                desc,
-                hint,
-                rarity,
+                id: def.id.clone(),
+                icon: def.icon,
+                name: def.name.clone(),
+                desc: def.desc.clone(),
+                hint: def.hint.clone(),
+                rarity: def.rarity,
             });
         }
     }
+
+    let new_achv = evaluate_achievements(p, total, level, &ev);
 
     AwardInfo {
         xp: gained,
@@ -1332,7 +1751,7 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
         level_up: level > before,
         goal_hit,
         streak: p.streak,
-        new_achv: ids.iter().filter_map(|id| achv_info(id)).collect(),
+        new_achv,
         new_animals,
     }
 }
@@ -1570,7 +1989,6 @@ fn claim_daily(state: State<AppState>, today: String) -> Result<AwardInfo, Strin
         &today,
         Event {
             base_xp: DAILY_BONUS,
-            unlock: Some("daily"),
             ..Default::default()
         },
     );
@@ -1634,20 +2052,21 @@ fn clear_history(state: State<AppState>) {
 
 #[derive(Serialize)]
 struct AchvView {
-    id: &'static str,
+    id: String,
     icon: &'static str,
-    name: &'static str,
-    desc: &'static str,
+    name: String,
+    desc: String,
+    group: &'static str,
     unlocked: bool,
 }
 
 #[derive(Serialize)]
 struct AnimalView {
-    id: &'static str,
+    id: String,
     icon: &'static str,
-    name: &'static str,
-    desc: &'static str,
-    hint: &'static str,
+    name: String,
+    desc: String,
+    hint: String,
     rarity: &'static str,
     unlocked: bool,
 }
@@ -1674,8 +2093,9 @@ struct Profile {
     animal_count: usize,
     animal_total: usize,
     history_count: usize,
+    achievement_count: usize,
+    achievement_total: usize,
     animals: Vec<AnimalView>,
-    achievements: Vec<AchvView>,
 }
 
 #[tauri::command]
@@ -1709,32 +2129,46 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
         new_questions,
         formula_due,
         formula_total: p.formula_review.len(),
-        animal_count: p.animals.len(),
-        animal_total: ANIMALS.len(),
+        animal_count: animal_defs()
+            .iter()
+            .filter(|d| p.animals.contains(&d.id))
+            .count(),
+        animal_total: animal_defs().len(),
         history_count: p.history.len(),
-        animals: ANIMALS
+        achievement_count: achievement_defs()
             .iter()
-            .map(|&(id, icon, name, desc, hint, rarity)| AnimalView {
-                id,
-                icon,
-                name,
-                desc,
-                hint,
-                rarity,
-                unlocked: p.animals.contains(id),
-            })
-            .collect(),
-        achievements: ACHV
+            .filter(|d| p.achv.contains(&d.id))
+            .count(),
+        achievement_total: achievement_defs().len(),
+        animals: animal_defs()
             .iter()
-            .map(|&(id, icon, name, desc)| AchvView {
-                id,
-                icon,
-                name,
-                desc,
-                unlocked: p.achv.contains(id),
+            .map(|d| AnimalView {
+                id: d.id.clone(),
+                icon: d.icon,
+                name: d.name.clone(),
+                desc: d.desc.clone(),
+                hint: d.hint.clone(),
+                rarity: d.rarity,
+                unlocked: p.animals.contains(&d.id),
             })
             .collect(),
     }
+}
+
+#[tauri::command]
+fn get_achievements(state: State<AppState>) -> Vec<AchvView> {
+    let p = state.progress();
+    achievement_defs()
+        .iter()
+        .map(|d| AchvView {
+            id: d.id.clone(),
+            icon: d.icon,
+            name: d.name.clone(),
+            desc: d.desc.clone(),
+            group: d.group,
+            unlocked: p.achv.contains(&d.id),
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -2303,6 +2737,7 @@ pub fn run() {
             get_history,
             clear_history,
             get_profile,
+            get_achievements,
             get_review_plan,
             reset_progress,
             list_formulas,
@@ -2465,6 +2900,25 @@ mod tests {
     }
 
     #[test]
+    fn catalogs_have_expected_sizes() {
+        assert_eq!(animal_defs().len(), 99);
+        assert_eq!(achievement_defs().len(), 888);
+
+        let animal_ids: BTreeSet<&str> = animal_defs().iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(animal_ids.len(), 99);
+
+        let achv_ids: BTreeSet<&str> = achievement_defs().iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(achv_ids.len(), 888);
+        assert_eq!(
+            achievement_defs()
+                .iter()
+                .filter(|a| a.group == "动物")
+                .count(),
+            99
+        );
+    }
+
+    #[test]
     fn daily_selection_is_stable_per_day() {
         let qs: Vec<Question> = (1..=20).map(sample_question).collect();
         let review = BTreeMap::new();
@@ -2548,8 +3002,8 @@ mod tests {
         );
         assert!(a.goal_hit);
         assert_eq!(a.xp, 10 + GOAL_BONUS);
-        assert!(p.achv.contains("goal"));
-        assert_eq!(a.new_achv.len(), 1);
+        assert!(p.achv.contains("special-goal"));
+        assert!(a.new_achv.iter().any(|x| x.id == "special-goal"));
         assert_eq!(a.streak, 1);
 
         // 同一天再结算一次，不重复发放目标奖励

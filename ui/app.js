@@ -1492,7 +1492,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.2 · 底部键盘 · 单手模式")
+          h("div", { class: "d" }, "0.9.3 · 大按键 · 强反馈")
         )
       )
     ),
@@ -2447,7 +2447,7 @@ async function startFormulaPractice() {
 
 function numberPad(input, onSubmit) {
   let locked = false;
-  const haptic = (pattern = 8) => {
+  const haptic = (pattern = 18) => {
     try {
       if (navigator.vibrate) navigator.vibrate(pattern);
     } catch {
@@ -2466,8 +2466,8 @@ function numberPad(input, onSubmit) {
     void input.offsetWidth;
     input.classList.add("bump");
   };
-  const button = (label, key) =>
-    h(
+  const button = (label, key) => {
+    const el = h(
       "button",
       {
         class:
@@ -2479,21 +2479,27 @@ function numberPad(input, onSubmit) {
         "data-key": key,
         "aria-label":
           key === "back" ? "删除" : key === "clear" ? "清空" : key === "neg" ? "正负号" : key === "ok" ? "确定" : label,
-        onclick: () => press(key),
+        onclick: () => press(key, el),
       },
       label
     );
+    return el;
+  };
   const buttons = keys.map(([label, key]) => button(label, key));
   const pad = h("div", { class: "keypad", role: "group", "aria-label": "数字键盘" }, buttons);
 
-  const press = (key) => {
+  const press = (key, element = null) => {
     if (locked) return;
-    const active = pad.querySelector(`.key[data-key="${key}"]`);
+    const active = element || pad.querySelector(`.key[data-key="${key}"]`);
     if (active) {
       active.classList.add("pressed");
-      setTimeout(() => active.classList.remove("pressed"), 120);
+      const ripple = document.createElement("span");
+      ripple.className = "key-ripple";
+      active.append(ripple);
+      setTimeout(() => ripple.remove(), 360);
+      setTimeout(() => active.classList.remove("pressed"), 150);
     }
-    haptic(8);
+    haptic(18);
     let v = input.value;
     if (key === "ok") {
       onSubmit();
@@ -2540,7 +2546,7 @@ function numberPad(input, onSubmit) {
       void input.offsetWidth;
       input.classList.add("shake");
       setTimeout(() => input.classList.remove("shake"), 360);
-      haptic([20, 30, 20]);
+      haptic([30, 40, 30]);
     },
   };
 }

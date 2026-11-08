@@ -230,15 +230,15 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
 }
 .ans:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-weak); }
 .ans[readonly] { cursor: default; }
-.ans.bump { animation: ans-bump .18s ease-out; }
-.ans.good { border-color: var(--ok-b); background: var(--ok); }
-.ans.bad { border-color: var(--bad-b); background: var(--bad); }
+.ans.bump { animation: ans-bump .2s ease-out; }
+.ans.good { border-color: var(--ok-b); background: var(--ok); box-shadow: 0 0 0 3px var(--ok); }
+.ans.bad { border-color: var(--bad-b); background: var(--bad); box-shadow: 0 0 0 3px var(--bad); }
 .ans.shake { animation: ans-shake .32s ease-in-out; }
 .ans.pad-locked { opacity: .86; }
 @keyframes ans-bump {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.015); }
-  100% { transform: scale(1); }
+  0% { transform: scale(1); border-color: var(--line); }
+  40% { transform: scale(1.025); border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-weak); }
+  100% { transform: scale(1); border-color: var(--primary); }
 }
 @keyframes ans-shake {
   0%, 100% { transform: translateX(0); }
@@ -271,8 +271,20 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
 .keypad .key.wide { grid-column: span 2; }
 .keypad .key.op { color: var(--sub); font-size: 17px; }
 .keypad .key.confirm { color: #fff; background: linear-gradient(135deg, var(--primary), #7a5cf6); border-color: transparent; font-size: 16px; }
-.keypad .key.pressed { transform: scale(.95); background: var(--primary-weak); }
-.keypad .key.confirm.pressed { background: linear-gradient(135deg, #4153cc, #6847e0); }
+.keypad .key:active,
+.keypad .key.pressed {
+  transform: scale(.93);
+  color: var(--primary);
+  background: var(--primary-weak);
+  border-color: var(--primary);
+  box-shadow: inset 0 2px 6px #10182818;
+}
+.keypad .key.confirm:active,
+.keypad .key.confirm.pressed {
+  color: #fff;
+  background: linear-gradient(135deg, #3f50c4, #5d3ed0);
+  border-color: transparent;
+}
 .keypad .key:disabled { opacity: .38; }
 .fb { min-height: 32px; margin-top: 12px; font-size: 18px; font-weight: 600; text-align: center; }
 .fb.good { color: var(--ok-b); }

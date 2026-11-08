@@ -245,9 +245,10 @@ python3 scripts/generate_questions.py
 
 - 答案输入框设置为只读，避免弹出系统键盘
 - App 内提供 4 列平铺数字键盘：0–9、小数点、正负号、退格、清空、确定
-- 每个按键带按下动画和轻触震动反馈
-- 每次按键输入框有轻微弹动；非法提交会抖动并震动提示
-- 提交后输入框变绿/变红，键盘立即禁用，避免重复提交
+- 每个按键带 `:active` 即时按压态、缩放、高亮和轻触震动
+- 每次按键输入框有边框/阴影/缩放弹动；非法提交会抖动并震动提示
+- Android 构建加入 `VIBRATE` 权限；不支持震动时视觉反馈仍然生效
+- 提交后输入框变绿/变红并加外圈高亮，键盘立即禁用，避免重复提交
 - 桌面端仍支持物理数字键、退格、Enter 提交
 
 ## 公式背诵
@@ -346,7 +347,6 @@ python3 scripts/generate_questions.py
 | 选择题 | `Enter` / `Space` 下一题 |
 | 计算训练 / 公式实操 | 下方数字键盘输入；`Enter` 提交 / 下一题 |
 | 公式背诵卡 | `Space` / `Enter` 显示答案；`1` 没记住、`2` 记住了 |
-| 公式实操 | 输入数字后 `Enter` 提交，再按 `Enter` 下一题 |
 | 答题 / 训练 / 公式 / 背诵 | `Esc` 返回 / 退出 |
 | 弹窗 | `Enter` 确认，`Esc` 取消 |
 
@@ -368,7 +368,8 @@ python3 scripts/generate_questions.py
 ├── .github/workflows/      # Android CI（含固定签名）
 ├── scripts/
 │   ├── configure-android-signing.py  # 给生成工程注入 release 签名
-│   └── generate_questions.py          # 生成扩充到 500 题的题库
+│   ├── generate_questions.py          # 生成扩充到 500 题的题库
+│   └── patch-android-manifest.py      # 给 Android 构建补震动权限
 ├── build.sh
 └── app-icon.png            # 图标源文件(1024×1024)
 ```

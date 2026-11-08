@@ -1491,7 +1491,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.0 · 内部数字键盘 · 每日任务 · 专注学习")
+          h("div", { class: "d" }, "0.9.1 · 内置键盘反馈修复")
         )
       )
     ),
@@ -2446,6 +2446,13 @@ async function startFormulaPractice() {
 
 function numberPad(input, onSubmit) {
   let locked = false;
+  const haptic = (pattern = 8) => {
+    try {
+      if (navigator.vibrate) navigator.vibrate(pattern);
+    } catch {
+      // WebView 可能因权限或安全上下文拒绝震动，视觉反馈仍然生效
+    }
+  };
   const keys = [
     ["7", "7"], ["8", "8"], ["9", "9"], ["⌫", "back"],
     ["4", "4"], ["5", "5"], ["6", "6"], ["C", "clear"],
@@ -2485,7 +2492,7 @@ function numberPad(input, onSubmit) {
       active.classList.add("pressed");
       setTimeout(() => active.classList.remove("pressed"), 120);
     }
-    if (navigator.vibrate) navigator.vibrate(8);
+    haptic(8);
     let v = input.value;
     if (key === "ok") {
       onSubmit();
@@ -2532,7 +2539,7 @@ function numberPad(input, onSubmit) {
       void input.offsetWidth;
       input.classList.add("shake");
       setTimeout(() => input.classList.remove("shake"), 360);
-      if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+      haptic([20, 30, 20]);
     },
   };
 }

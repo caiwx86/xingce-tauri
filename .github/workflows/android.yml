@@ -92,6 +92,9 @@ jobs:
           cargo tauri android init --ci
 
       # 有签名密钥时构建 release 并使用固定密钥签名；没有时退回 debug 构建
+      - name: 添加键盘震动权限
+        run: python3 scripts/patch-android-manifest.py
+
       - name: 检查签名密钥
         id: signing
         env:

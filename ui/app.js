@@ -542,7 +542,9 @@ async function renderHome() {
         card("🧮 计算训练", "21 类速算 · 10/20/30 题", renderDrillMenu),
         card(
           "🧠 公式背诵",
-          `${formulas.length} 个公式 · 今日待复习 ${pf.formula_due} 个`,
+          pf.formula_due
+            ? `${formulas.length} 个公式 · 今日待复习 ${pf.formula_due} 个`
+            : `${formulas.length} 个公式 · 背诵卡 + 测验`,
           renderFormulaList,
           "hot"
         )
@@ -1335,7 +1337,7 @@ let S = null;
 let F = null;
 let FC = null;
 let FORMULAS_CACHE = null;
-let memorizeFormulas = false;
+let memorizeFormulas = true;
 let formulaScope = "all";
 
 async function start(mode, opts = {}) {

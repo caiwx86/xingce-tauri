@@ -35,6 +35,16 @@ cargo tauri icon app-icon.png
 
 [ -d src-tauri/gen/android ] || cargo tauri android init --ci
 
+if [ "$MODE" = "release" ]; then
+  if [ -f src-tauri/gen/android/keystore.properties ]; then
+    command -v python3 >/dev/null || { echo "签名配置需要 python3" >&2; exit 1; }
+    python3 scripts/configure-android-signing.py
+  else
+    echo "警告：未找到 src-tauri/gen/android/keystore.properties，release 构建可能未签名。" >&2
+    echo "请参考 README 配置 keystore.properties，或使用 GitHub Actions 的固定签名。" >&2
+  fi
+fi
+
 echo "运行单元测试…"
 cargo test --manifest-path src-tauri/Cargo.toml
 

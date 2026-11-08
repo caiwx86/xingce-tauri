@@ -94,6 +94,130 @@ function shuffle(xs) {
 let navToken = 0;
 const newNav = () => ++navToken;
 const navIsCurrent = (token) => token === navToken;
+const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const REMINDER_KEY = "xingce.reminder";
+const REMINDER_ID = 7102026;
+
+/* ---------------- 每日提醒 ---------------- */
+
+function readReminder() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REMINDER_KEY) || "null");
+    const hour = Number(raw?.hour);
+    const minute = Number(raw?.minute);
+    return {
+      enabled: raw?.enabled === true,
+      hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 21,
+      minute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : 0,
+    };
+  } catch {
+    return { enabled: false, hour: 21, minute: 0 };
+  }
+}
+
+function saveReminder(r) {
+  try {
+    localStorage.setItem(REMINDER_KEY, JSON.stringify(r));
+  } catch {
+    // 存储不可用时只在内存中生效
+  }
+}
+
+function reminderText(r) {
+  return `${String(r.hour).padStart(2, "0")}:${String(r.minute).padStart(2, "0")}`;
+}
+
+async function tryPlugin(cmd, args = {}) {
+  try {
+    return await invoke(`plugin:notification|${cmd}`, args);
+  } catch (err) {
+    console.warn(`[notification:${cmd}]`, err);
+    return null;
+  }
+}
+
+async function ensureNotificationPermission() {
+  if (!IS_MOBILE) return false;
+  const granted = await tryPlugin("is_permission_granted");
+  if (granted === true) return true;
+  if (granted === false) {
+    toast("通知权限已被拒绝，请到系统设置中开启");
+    return false;
+  }
+  const state = await tryPlugin("request_permission");
+  const ok = state === "granted" || state === "Granted" || state === true;
+  if (!ok) toast("未获得通知权限");
+  return ok;
+}
+
+async function scheduleDailyReminder(hour, minute, quiet = false) {
+  await tryPlugin("cancel", { notifications: [REMINDER_ID] });
+  let channelId = null;
+  if (IS_ANDROID) {
+    try {
+      await invoke("plugin:notification|create_channel", {
+        id: "daily-reminder",
+        name: "每日提醒",
+        description: "每天提醒完成行测目标",
+        importance: 3,
+        visibility: 0,
+        lights: true,
+        vibration: true,
+      });
+      channelId = "daily-reminder";
+    } catch (err) {
+      console.warn("[notification:create_channel]", err);
+    }
+  }
+  const options = {
+    id: REMINDER_ID,
+    ...(channelId ? { channelId } : {}),
+    title: "行测刷题 · 每日提醒",
+    body: "今天的目标还没完成，来做几道题吧！",
+    schedule: {
+      interval: {
+        interval: { hour, minute },
+        allowWhileIdle: true,
+      },
+    },
+  };
+  if (quiet) await tryPlugin("notify", { options });
+  else await call("plugin:notification|notify", { options });
+}
+
+async function cancelDailyReminder() {
+  await call("plugin:notification|cancel", { notifications: [REMINDER_ID] });
+}
+
+async function sendTestNotification() {
+  if (!IS_MOBILE) {
+    toast("桌面端不支持系统通知，请在手机上测试");
+    return;
+  }
+  if (!(await ensureNotificationPermission())) return;
+  await call("plugin:notification|notify", {
+    options: {
+      id: REMINDER_ID + 1,
+      title: "行测刷题 · 测试提醒",
+      body: "提醒功能已生效，明天见！",
+    },
+  });
+  toast("已发送测试通知");
+}
+
+async function syncReminderOnStart() {
+  const r = readReminder();
+  if (!r.enabled || !IS_MOBILE) return;
+  const granted = await tryPlugin("is_permission_granted");
+  if (granted === true) {
+    try {
+      await scheduleDailyReminder(r.hour, r.minute, true);
+    } catch {
+      // 后台同步失败时保持现有计划
+    }
+  }
+}
 
 /* ---------------- 弹窗 / 庆祝 ---------------- */
 
@@ -210,6 +334,15 @@ function celebrate(a) {
 
 /* ---------------- 首页 ---------------- */
 
+function section(title, note, ...kids) {
+  return h(
+    "section",
+    { class: "section" },
+    h("div", { class: "section-head" }, h("h2", {}, title), note ? h("span", {}, note) : null),
+    ...kids
+  );
+}
+
 function card(title, desc, onclick, extra = "") {
   return h(
     "button",
@@ -267,21 +400,23 @@ async function renderHome() {
   const token = newNav();
   stopTimer();
   S = null;
-  if (D) D.active = false;
   D = null;
+  F = null;
 
-  let cats, st, pf;
+  let cats, st, pf, formulas;
   try {
-    [cats, st, pf] = await Promise.all([
+    [cats, st, pf, formulas] = await Promise.all([
       call("list_categories"),
       call("get_stats"),
       call("get_profile", { today: today() }),
+      call("list_formulas"),
     ]);
   } catch (err) {
     if (navIsCurrent(token)) renderError(err);
     return;
   }
   if (!navIsCurrent(token)) return;
+  FORMULAS_CACHE = formulas;
 
   const totalQ = cats.reduce((a, c) => a + c.count, 0);
   const catDone = Object.values(st.stats || {}).reduce((a, s) => a + (s.done || 0), 0);
@@ -294,11 +429,24 @@ async function renderHome() {
   const got = pf.achievements.filter((a) => a.unlocked).length;
 
   screen(
-    h("h1", {}, "行测刷题"),
     h(
-      "p",
-      { class: "sub" },
-      pf.streak ? `已连续打卡 ${pf.streak} 天，别断哦！` : "今天做几道题，开启你的连续打卡"
+      "div",
+      { class: "home-head" },
+      h(
+        "div",
+        {},
+        h("h1", {}, "行测刷题"),
+        h(
+          "p",
+          { class: "sub" },
+          pf.streak ? `已连续打卡 ${pf.streak} 天，别断哦！` : "今天做几道题，开启你的连续打卡"
+        )
+      ),
+      h(
+        "button",
+        { class: "icon-btn", type: "button", "aria-label": "设置与提醒", onclick: renderSettings },
+        "⚙️"
+      )
     ),
     profileCard(pf),
     h(
@@ -308,35 +456,59 @@ async function renderHome() {
       h("span", {}, `正确率 ${pct(right, done)}`),
       h("span", {}, `错题 ${wrongs}`)
     ),
-    h(
-      "div",
-      { class: "list" },
-      card(
-        "📅 每日挑战",
-        pf.daily_done ? "今日已完成 ✓ 明天再来" : "5 道精选题 · 完成额外 +30 XP",
-        () => start("每日挑战"),
-        pf.daily_done ? "" : "hot"
-      ),
-      card("⚡ 快速练习", "随机 10 题 · 跨题型热身", () =>
-        start("全部", { limit: 10, shuffle: true, label: "快速练习" })
-      ),
-      card("🧮 计算训练", "速算 · 平方 · 分数百分数 · 增长率", renderDrillMenu),
-      card("全部题型", `${totalQ} 题`, () => start("全部")),
-      cats.map((c) => {
-        const s = st.stats?.[c.name] || { done: 0, right: 0 };
-        return card(
-          c.name,
-          `${c.count} 题` + (s.done ? ` · 正确率 ${pct(s.right, s.done)}` : ""),
-          () => start(c.name)
-        );
-      }),
-      card("错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
-      card("🏅 成就", `已解锁 ${got} / ${pf.achievements.length}`, renderAchv)
+    section(
+      "今日",
+      "完成 20 题即达标",
+      h(
+        "div",
+        { class: "list" },
+        card(
+          "📅 每日挑战",
+          pf.daily_done ? "今日已完成 ✓ 明天再来" : "5 道精选题 · 完成额外 +30 XP",
+          () => start("每日挑战"),
+          pf.daily_done ? "" : "hot"
+        ),
+        card("⚡ 快速练习", "随机 10 题 · 跨题型热身", () =>
+          start("全部", { limit: 10, shuffle: true, label: "快速练习" })
+        )
+      )
     ),
-    h(
-      "div",
-      { class: "center" },
-      h("button", { class: "link danger", type: "button", onclick: resetAll }, "清空所有进度")
+    section(
+      "专项训练",
+      "速算 · 公式",
+      h(
+        "div",
+        { class: "grid2" },
+        card("🧮 计算训练", "16 类速算 · 10/20/30 题", renderDrillMenu),
+        card("🧠 资料分析公式", `${formulas.length} 个公式 · 背诵 + 测验`, renderFormulaList, "hot")
+      )
+    ),
+    section(
+      "题库练习",
+      `${totalQ} 题 · 五大分类`,
+      h(
+        "div",
+        { class: "grid2" },
+        card("📚 全部题型", `${totalQ} 题`, () => start("全部"), "wide"),
+        cats.map((c) => {
+          const s = st.stats?.[c.name] || { done: 0, right: 0 };
+          return card(
+            c.name,
+            `${c.count} 题` + (s.done ? ` · 正确率 ${pct(s.right, s.done)}` : ""),
+            () => start(c.name)
+          );
+        })
+      )
+    ),
+    section(
+      "复习与成就",
+      "错题 · 徽章",
+      h(
+        "div",
+        { class: "grid2" },
+        card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
+        card("🏅 成就", `已解锁 ${got} / ${pf.achievements.length}`, renderAchv)
+      )
     )
   );
 }
@@ -358,9 +530,164 @@ async function resetAll() {
   renderHome();
 }
 
+function renderSettings() {
+  newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+
+  const r = readReminder();
+  const enabled = IS_MOBILE && r.enabled;
+  const toggle = h("input", {
+    class: "switch",
+    type: "checkbox",
+    checked: enabled,
+    disabled: !IS_MOBILE,
+    "aria-label": "开启每日提醒",
+  });
+  const time = h("input", {
+    class: "time-input",
+    type: "time",
+    value: reminderText(r),
+    disabled: !IS_MOBILE,
+    "aria-label": "提醒时间",
+  });
+  const status = h(
+    "p",
+    { class: "sub" },
+    !IS_MOBILE ? "桌面端暂不支持系统通知，请在手机上设置。" : enabled ? `已开启 · 每天 ${reminderText(r)}` : "未开启每日提醒"
+  );
+
+  const save = h(
+    "button",
+    {
+      class: "primary",
+      type: "button",
+      disabled: !IS_MOBILE,
+      onclick: async () => {
+        if (!IS_MOBILE) {
+          toast("桌面端暂不支持系统通知，请在手机上设置");
+          return;
+        }
+        const [hourText, minuteText] = (time.value || "21:00").split(":");
+        const hour = Number(hourText);
+        const minute = Number(minuteText);
+        if (
+          !Number.isInteger(hour) ||
+          !Number.isInteger(minute) ||
+          hour < 0 ||
+          hour > 23 ||
+          minute < 0 ||
+          minute > 59
+        ) {
+          toast("请选择有效的提醒时间");
+          return;
+        }
+        const next = { enabled: toggle.checked, hour, minute };
+        if (next.enabled) {
+          if (!(await ensureNotificationPermission())) return;
+          try {
+            await scheduleDailyReminder(hour, minute);
+          } catch {
+            return;
+          }
+        } else {
+          try {
+            await cancelDailyReminder();
+          } catch {
+            return;
+          }
+        }
+        saveReminder(next);
+        toast(next.enabled ? `已设置每天 ${reminderText(next)} 提醒` : "已关闭每日提醒");
+        renderSettings();
+      },
+    },
+    "保存提醒"
+  );
+  const test = h("button", {
+    class: "link",
+    type: "button",
+    onclick: sendTestNotification,
+  }, "发送测试通知");
+  if (!IS_MOBILE) test.classList.add("hidden");
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span")
+    ),
+    h("h1", {}, "设置"),
+    h("p", { class: "sub" }, "把提醒时间固定下来，比“想起来再练”更有效。"),
+    h(
+      "div",
+      { class: "settings-card" },
+      h(
+        "div",
+        { class: "setting-row" },
+        h(
+          "div",
+          {},
+          h("div", { class: "t" }, "每日提醒"),
+          h("div", { class: "d" }, IS_MOBILE ? "每天固定时间提醒你完成目标" : "桌面端暂不支持系统通知")
+        ),
+        h(
+          "label",
+          { class: "switch-wrap" },
+          toggle,
+          h("span", { class: "switch-track" }, h("span", { class: "switch-thumb" }))
+        )
+      ),
+      h(
+        "div",
+        { class: "setting-row" },
+        h("div", {}, h("div", { class: "t" }, "提醒时间"), h("div", { class: "d" }, "按手机本地时区")),
+        time
+      ),
+      status,
+      h("div", { class: "actions" }, save, test)
+    ),
+    h(
+      "div",
+      { class: "settings-card" },
+      h(
+        "div",
+        { class: "setting-row" },
+        h(
+          "div",
+          {},
+          h("div", { class: "t" }, "数据与隐私"),
+          h("div", { class: "d" }, "进度只保存在本机应用私有目录，不上传服务器。")
+        )
+      ),
+      h(
+        "div",
+        { class: "setting-row" },
+        h(
+          "div",
+          {},
+          h("div", { class: "t" }, "版本"),
+          h("div", { class: "d" }, "0.3.0 · 40 道题库 · 16 类速算 · 15 个公式")
+        )
+      )
+    ),
+    h(
+      "div",
+      { class: "center" },
+      h("button", { class: "link danger", type: "button", onclick: resetAll }, "清空所有进度")
+    )
+  );
+}
+
 async function renderAchv() {
   const token = newNav();
   stopTimer();
+  S = null;
+  D = null;
+  F = null;
   let pf;
   try {
     pf = await call("get_profile", { today: today() });
@@ -391,9 +718,248 @@ async function renderAchv() {
   );
 }
 
+/* ---------------- 资料分析公式 ---------------- */
+
+async function renderFormulaList() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+
+  let formulas = FORMULAS_CACHE;
+  if (!formulas || !formulas.length) {
+    try {
+      formulas = await call("list_formulas");
+    } catch (err) {
+      if (navIsCurrent(token)) renderError(err);
+      return;
+    }
+    FORMULAS_CACHE = formulas;
+  }
+  if (!navIsCurrent(token)) return;
+
+  const groups = [...new Set(formulas.map((f) => f.group))];
+  const formulaSections = groups.map((group) => {
+    const items = formulas.filter((f) => f.group === group);
+    return section(
+      group,
+      `${items.length} 条`,
+      h(
+        "div",
+        { class: "formula-list" },
+        items.map((f) =>
+          h(
+            "details",
+            { class: "formula", open: !memorizeFormulas },
+            h(
+              "summary",
+              {},
+              h("span", { class: "fname" }, f.name),
+              h("span", { class: "fgroup" }, memorizeFormulas ? "点击查看" : "公式")
+            ),
+            h(
+              "div",
+              { class: "fbody" },
+              h("div", { class: "fformula" }, f.formula),
+              h("div", { class: "fnote" }, f.note),
+              h("div", { class: "fexample" }, "例：" + f.example)
+            )
+          )
+        )
+      )
+    );
+  });
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span")
+    ),
+    h("h1", {}, "资料分析公式"),
+    h("p", { class: "sub" }, `${formulas.length} 个高频公式：先理解，再背诵，最后用测验检验。`),
+    h(
+      "div",
+      { class: "formula-actions" },
+      h("button", { class: "primary", type: "button", onclick: startFormulaQuiz }, "开始公式测验"),
+      h(
+        "button",
+        {
+          class: "chip" + (memorizeFormulas ? " on" : ""),
+          type: "button",
+          "aria-pressed": memorizeFormulas ? "true" : "false",
+          onclick: () => {
+            memorizeFormulas = !memorizeFormulas;
+            renderFormulaList();
+          },
+        },
+        memorizeFormulas ? "背诵模式：隐藏公式" : "背诵模式：显示公式"
+      )
+    ),
+    formulaSections,
+    h("button", { class: "primary", type: "button", onclick: startFormulaQuiz }, "开始公式测验")
+  );
+}
+
+function startFormulaQuiz() {
+  const pool = FORMULAS_CACHE || [];
+  if (pool.length < 4) {
+    toast("公式数据未加载，请返回重试");
+    return;
+  }
+  newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  const picked = shuffle(pool).slice(0, Math.min(10, pool.length));
+  const qs = picked.map((f) => {
+    const others = shuffle(pool.filter((x) => x.id !== f.id && x.formula !== f.formula))
+      .slice(0, 3)
+      .map((x) => x.formula);
+    while (others.length < 3) others.push("以上都不对");
+    const options = shuffle([f.formula, ...others]);
+    return {
+      id: f.id,
+      prompt: `「${f.name}」的计算公式是？`,
+      options,
+      answer: options.indexOf(f.formula),
+      explanation: `${f.note} 例：${f.example}`,
+    };
+  });
+  F = { qs, i: 0, right: 0, done: false, log: [] };
+  renderFormulaQ();
+}
+
+function renderFormulaQ() {
+  const q = F.qs[F.i];
+  const last = F.i + 1 >= F.qs.length;
+  F.done = false;
+  const opts = q.options.map((text, k) =>
+    h(
+      "button",
+      { class: "opt", type: "button", onclick: () => chooseFormula(k) },
+      h("b", {}, String.fromCharCode(65 + k)),
+      h("span", {}, text)
+    )
+  );
+  const exp = h("div", { class: "exp hidden", "aria-live": "polite" });
+  const next = h(
+    "button",
+    {
+      class: "primary hidden",
+      type: "button",
+      onclick: () => {
+        if (last) renderFormulaResult();
+        else {
+          F.i++;
+          renderFormulaQ();
+        }
+      },
+    },
+    last ? "查看结果" : "下一题"
+  );
+  F.ui = { opts, exp, next, q };
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h(
+        "button",
+        {
+          class: "link",
+          type: "button",
+          onclick: () => {
+            F = null;
+            renderFormulaList();
+          },
+        },
+        "← 公式列表"
+      ),
+      h("span", {}, `${F.i + 1} / ${F.qs.length}`)
+    ),
+    h(
+      "div",
+      {
+        class: "progress",
+        role: "progressbar",
+        "aria-label": "公式测验进度",
+        "aria-valuemin": 0,
+        "aria-valuemax": F.qs.length,
+        "aria-valuenow": F.i + 1,
+      },
+      h("i", { style: `width:${((F.i + 1) / F.qs.length) * 100}%` })
+    ),
+    h("span", { class: "tag" }, "公式测验"),
+    h("p", { class: "stem" }, q.prompt),
+    h("div", { class: "opts", role: "group", "aria-label": "公式选项" }, opts),
+    exp,
+    next,
+    h("p", { class: "kbd-hint" }, "按 1–4 或 A–D 作答，Enter 下一题")
+  );
+}
+
+function chooseFormula(k) {
+  if (!F || F.done) return;
+  const q = F.ui.q;
+  const correct = k === q.answer;
+  F.done = true;
+  if (correct) F.right++;
+  F.log.push({ q, choice: k, correct });
+  F.ui.opts.forEach((b, j) => {
+    b.disabled = true;
+    if (j === q.answer) b.classList.add("ok");
+    else if (j === k) b.classList.add("bad");
+  });
+  F.ui.exp.replaceChildren(
+    h("div", {}, (correct ? "✓ 正确。" : "✗ 错误。") + q.explanation)
+  );
+  F.ui.exp.classList.remove("hidden");
+  F.ui.next.classList.remove("hidden");
+  F.ui.next.focus({ preventScroll: true });
+}
+
+function renderFormulaResult() {
+  if (!F) return;
+  const session = F;
+  F = null;
+  const total = session.qs.length;
+  const right = session.right;
+  const wrongs = session.log.filter((x) => !x.correct);
+  screen(
+    h(
+      "div",
+      { class: "center" },
+      h("div", { class: "big" }, pct(right, total)),
+      h("p", { class: "sub" }, `公式测验 ${total} 题，答对 ${right} 题`),
+      h("p", { class: "sub" }, "本次不记录 XP，重点是记住公式。")
+    ),
+    h(
+      "div",
+      { class: "review-head" },
+      h("b", {}, "公式回顾"),
+      h("span", { class: "sub" }, `${wrongs.length} 条需巩固`)
+    ),
+    h("div", { class: "reviews" }, session.log.map(reviewItem)),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "primary", type: "button", onclick: startFormulaQuiz }, "再测一次"),
+      h("button", { class: "link", type: "button", onclick: renderFormulaList }, "返回公式列表"),
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+    )
+  );
+  if (right === total) confetti();
+}
+
 /* ---------------- 题库练习 ---------------- */
 
 let S = null;
+let F = null;
+let FORMULAS_CACHE = null;
+let memorizeFormulas = false;
 
 async function start(mode, opts = {}) {
   const token = newNav();
@@ -409,6 +975,7 @@ async function start(mode, opts = {}) {
     toast(mode === "错题本" ? "错题本是空的" : "该题型暂无题目");
     return;
   }
+  F = null;
   S = {
     mode,
     label: opts.label || mode,
@@ -562,7 +1129,7 @@ function reviewItem(item, idx) {
       "summary",
       {},
       h("span", { class: "ricon", "aria-hidden": "true" }, correct ? "✓" : "✗"),
-      h("span", { class: "rstem" }, `${idx + 1}. ${q.stem}`)
+      h("span", { class: "rstem" }, `${idx + 1}. ${q.stem || q.prompt || ""}`)
     ),
     h(
       "div",
@@ -660,6 +1227,8 @@ async function renderDrillMenu() {
   stopTimer();
   if (D) D.active = false;
   D = null;
+  S = null;
+  F = null;
 
   let kinds, st;
   try {
@@ -670,23 +1239,50 @@ async function renderDrillMenu() {
   }
   if (!navIsCurrent(token)) return;
   const drill = st.drill || {};
+  const byName = Object.fromEntries(kinds.map((k) => [k.name, k]));
+  const groups = [
+    {
+      title: "基础速算",
+      note: "加减乘除 · 估算",
+      names: ["综合", "加减", "乘法", "平方", "除法", "分数", "估算", "混合"],
+    },
+    {
+      title: "资料分析",
+      note: "增长 · 比重 · 平均",
+      names: ["百分比", "增长", "增长量", "基期量", "比重", "平均数", "倍数", "百分点"],
+    },
+  ];
+  const used = new Set();
+  const renderKind = (k) => {
+    used.add(k.name);
+    const s = drill[k.name];
+    let extra = "";
+    if (s && s.done) {
+      extra = ` · 已练${s.done}题 正确率${pct(s.right, s.done)}`;
+      if (s.best_avg_secs) extra += ` · 最佳${s.best_avg_secs.toFixed(1)}秒/题`;
+    }
+    return card(k.name, k.desc + extra, () => renderDrillStart(k));
+  };
+  const groupSections = groups
+    .map((g) => {
+      const cards = g.names.map((n) => byName[n]).filter(Boolean).map(renderKind);
+      return cards.length ? section(g.title, g.note, h("div", { class: "grid2" }, cards)) : null;
+    })
+    .filter(Boolean);
+  const extras = kinds.filter((k) => !used.has(k.name)).map(renderKind);
+  if (extras.length) {
+    groupSections.push(section("其他", "", h("div", { class: "grid2" }, extras)));
+  }
 
   screen(
     h("div", { class: "bar" }, h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"), h("span")),
     h("h1", {}, "计算训练"),
-    h("p", { class: "sub" }, "限时速算，练出行测的计算手感"),
+    h("p", { class: "sub" }, "基础速算 + 资料分析专项，按组练习更清晰。"),
+    groupSections,
     h(
       "div",
-      { class: "list" },
-      kinds.map((k) => {
-        const s = drill[k.name];
-        let extra = "";
-        if (s && s.done) {
-          extra = ` · 已练${s.done}题 正确率${pct(s.right, s.done)}`;
-          if (s.best_avg_secs) extra += ` · 最佳${s.best_avg_secs.toFixed(1)}秒/题`;
-        }
-        return card(k.name, k.desc + extra, () => renderDrillStart(k));
-      })
+      { class: "center" },
+      h("button", { class: "link", type: "button", onclick: renderFormulaList }, "📐 资料分析公式速查")
     )
   );
 }
@@ -969,6 +1565,10 @@ document.addEventListener("keydown", (e) => {
     if (D && D.active) {
       e.preventDefault();
       leaveDrill();
+    } else if (F) {
+      e.preventDefault();
+      F = null;
+      renderFormulaList();
     } else if (S) {
       e.preventDefault();
       leaveQuiz();
@@ -977,6 +1577,23 @@ document.addEventListener("keydown", (e) => {
   }
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+
+  if (F && F.ui) {
+    if (!F.done) {
+      const k = CHOICE_KEYS[e.key.toLowerCase()];
+      if (k !== undefined && k < F.ui.opts.length && k < MAX_OPTION_KEY) {
+        e.preventDefault();
+        chooseFormula(k);
+      }
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      F.ui.next.click();
+    }
+    return;
+  }
+
   if (!S || !S.ui) return;
 
   if (!S.done) {
@@ -1022,4 +1639,5 @@ if (!invoke) {
   );
 } else {
   renderHome();
+  setTimeout(syncReminderOnStart, 1200);
 }

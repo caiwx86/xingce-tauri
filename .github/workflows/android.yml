@@ -21,7 +21,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +29,19 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      # clippy/test 会在 Linux 主机上编译 Tauri 桌面依赖，需要这些系统库
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev
 
       # ubuntu-latest 已预装 Android SDK 与 NDK,无需 setup-android
       - name: 配置 NDK
@@ -78,6 +91,34 @@ jobs:
           cargo tauri icon app-icon.png
           cargo tauri android init --ci
 
+      # 有签名密钥时构建 release 并使用固定密钥签名；没有时退回 debug 构建
+      - name: 检查签名密钥
+        id: signing
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEY_BASE64" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 配置 Android 签名
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          base64 -d <<< "$ANDROID_KEY_BASE64" > "$RUNNER_TEMP/xingce-upload.jks"
+          {
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "password=$ANDROID_KEY_PASSWORD"
+            echo "storeFile=$RUNNER_TEMP/xingce-upload.jks"
+          } > src-tauri/gen/android/keystore.properties
+          python3 scripts/configure-android-signing.py
+
       # Android 工程是 init 之后才生成的，所以缓存步骤放在 init 之后
       - name: 缓存 Gradle
         uses: actions/cache@v4
@@ -89,12 +130,17 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: 构建 APK(debug 签名，可直接安装)
+      - name: 构建签名 release APK
+        if: steps.signing.outputs.enabled == 'true'
+        run: cargo tauri android build --apk --target aarch64 --ci
+
+      - name: 构建 debug APK(未配置签名时)
+        if: steps.signing.outputs.enabled != 'true'
         run: cargo tauri android build --apk --debug --target aarch64 --ci
 
       - uses: actions/upload-artifact@v4
         with:
-          name: xingce-apk-debug
+          name: xingce-apk
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14

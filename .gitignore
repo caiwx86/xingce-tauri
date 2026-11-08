@@ -15,3 +15,7 @@ dist/
 screenshots/
 ui/_harness.html
 *.log
+
+# Python
+__pycache__/
+*.pyc

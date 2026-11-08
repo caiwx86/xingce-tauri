@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0
+
+### 新增
+
+- **每日提醒**：设置页可开启/关闭、选择时间；使用 Tauri 通知插件在 Android/iOS 上调度本地通知，支持 Android 通知渠道与 Android 13+ 权限请求
+- **资料分析公式**：15 个高频公式速查，支持背诵模式（默认隐藏公式、点击展开）和 10 题公式测验
+- **更多基础数据训练**：新增百分比、增长量、基期量、比重、平均数、倍数、百分点、估算 8 类，速算题型从 8 类扩展到 16 类
+- **设置页**：提醒设置、数据说明、版本信息和清空进度入口集中管理
+- **公式数据校验**：单元测试检查公式 id、分组、名称、说明和例子完整性
+
+### 构建与签名
+
+- GitHub Actions 使用固定 upload key 做 release 签名；密钥通过 `ANDROID_KEY_BASE64`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` Secrets 注入
+- 新增 `scripts/configure-android-signing.py`，在 `android init` 后给 Gradle 注入 `signingConfigs.release`
+- 未配置签名密钥时自动退回 debug 构建，保证 CI 仍可产出 APK
+- CI 增加 Linux 桌面构建依赖，便于在打包前运行 fmt/clippy/test
+- 本地 `./build.sh --release` 支持读取 `keystore.properties` 并自动注入签名
+
+### 结构 / 界面
+
+- 首页改为「今日 / 专项训练 / 题库练习 / 复习与成就」分区，分类和专项使用双列卡片
+- 计算训练按「基础速算 / 资料分析」分组
+- 设置页、公式页、公式测验复用现有组件与键盘交互
+- 版本号升级到 0.3.0
+
 ## 0.2.0
 
 ### 修复与健壮性

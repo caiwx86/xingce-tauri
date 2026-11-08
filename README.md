@@ -7,10 +7,12 @@
 - **分类题库**:言语理解、数量关系、判断推理、资料分析、常识判断，共 40 道内置题
 - **练习模式**:全部题型 / 单个分类 / 随机 10 题快速练习 / 错题本
 - **每日挑战**:按日期做种子，每天固定 5 题，完成额外 +30 XP
-- **计算训练**:加减、乘法、平方、除法、分数化百分数、增长率、四则混合；支持 10/20/30 题
+- **计算训练**:16 类基础数据训练——加减、乘法、平方、除法、分数、百分比、增长、增长量、基期量、比重、平均数、倍数、百分点、估算、混合、综合；支持 10/20/30 题
+- **资料分析公式**:15 个高频公式速查、背诵模式、公式测验
+- **每日提醒**:设置每天固定时间提醒，Android/iOS 使用系统本地通知
 - **答题回顾**:结束后逐题展示你的答案、正确答案和解析，错题默认展开
 - **游戏化**:12 级职级、连击加成、每日目标、连续打卡、补签卡、13 个成就
-- **体验细节**:深色模式、键盘作答、切后台自动暂停计时、减少动效适配、安全区适配
+- **体验细节**:深色模式、键盘作答、切后台自动暂停计时、减少动效适配、安全区适配、首页分区与双列卡片
 
 ## 技术栈
 
@@ -75,15 +77,45 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 
 ### GitHub Actions
 
-推送到 `main` / `master` 会自动构建，也可以在 Actions 页面手动触发。构建完成后在本次运行的 **Artifacts** 中下载 `xingce-apk-debug`(debug 签名，可直接安装)。
+推送到 `main` / `master` 会自动构建，也可以在 Actions 页面手动触发。构建完成后在本次运行的 **Artifacts** 中下载 `xingce-apk`；配置了签名密钥时是 **release 签名包**，否则退回 debug 包。
 
 工作流做了这些优化：
 
-- Rust target 与 `tauri-cli` 二进制分别缓存，Gradle 依赖缓存
+- Rust target、`tauri-cli` 二进制、Gradle 依赖分别缓存
 - 构建前先跑 `cargo fmt --check`、`cargo clippy -D warnings` 和单元测试
 - 同一分支的新构建会取消尚未完成的旧构建
+- 固定签名：从 GitHub Secrets 读取同一把 upload key，保证每次构建的 APK 可以覆盖安装
 
-正式发布请使用自己的 keystore 做 release 签名。
+### 固定 APK 签名
+
+仓库已配置以下 GitHub Actions Secrets：
+
+| Secret | 说明 |
+| --- | --- |
+| `ANDROID_KEY_BASE64` | keystore 文件的 base64 内容 |
+| `ANDROID_KEY_ALIAS` | key alias |
+| `ANDROID_KEY_PASSWORD` | store password / key password |
+
+工作流在 `android init` 之后写入 `src-tauri/gen/android/keystore.properties`，再调用 `scripts/configure-android-signing.py` 给 Gradle 注入 `signingConfigs.release`，因此 CI 产物使用固定密钥签名。
+
+本地 release 构建：
+
+```bash
+keytool -genkey -v -keystore ~/xingce-upload.jks -keyalg RSA -keysize 2048 \
+  -validity 10000 -alias xingce
+
+cat > src-tauri/gen/android/keystore.properties <<EOF
+keyAlias=xingce
+password=你的密码
+storeFile=$HOME/xingce-upload.jks
+EOF
+
+./build.sh --release
+```
+
+> keystore 和密码不要提交到仓库；日常自用更推荐把密钥放在 GitHub Secrets 里由 Actions 构建。
+
+> 首次从旧的 debug 包切换到固定签名 release 包时，因为签名不同，需要先卸载旧包再安装；之后同一把 key 构建的 APK 可以直接覆盖升级。
 
 ## 数据与存档
 
@@ -101,7 +133,7 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 - 先写 `progress.json.tmp` 并 `fsync`，再原子改名，避免写一半崩溃导致坏档
 - 每次保存前把上一份存档复制为 `progress.backup.json`
 - 启动时主档损坏会自动回退到备份，坏档保留为 `progress.corrupt.json`
-- 首页底部「清空所有进度」会二次确认，然后重置所有数据
+- 设置页底部「清空所有进度」会二次确认，然后重置所有数据
 
 > `tauri.conf.json` 里的 `identifier` 目前是 `com.example.xingce`。正式发布前建议改成自己的反向域名；注意改 identifier 会改变应用数据目录，旧进度不会自动迁移。
 
@@ -132,7 +164,7 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 
 ## 计算训练
 
-题目由 Rust 随机生成(`src-tauri/src/lib.rs` 的 `make`），每次不同，不占题库。
+题目由 Rust 随机生成（`src-tauri/src/lib.rs` 的 `make`），每次不同，不占题库。
 
 | 题型 | 说明 |
 | --- | --- |
@@ -142,7 +174,15 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 | 平方 | 11–35 的平方 |
 | 除法 | 整除除法 |
 | 分数 | 分数化百分数，保留 1 位小数 |
+| 百分比 | 求一个数的百分之几 |
 | 增长 | 增长/下降百分比 |
+| 增长量 | 由基期量和增长率求增长量 |
+| 基期量 | 由现期量和增长率求基期量 |
+| 比重 | 部分量占整体量的比例 |
+| 平均数 | 总量除以份数 |
+| 倍数 | 求两个量的倍数关系 |
+| 百分点 | 两个百分数直接相减 |
+| 估算 | 四舍五入到整百估算乘积 |
 | 混合 | 四则混合运算 |
 
 新增题型：在 `DRILLS` 常量加一行，并在 `make` 里加一个 `match` 分支即可。
@@ -151,6 +191,27 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 - 切到后台会暂停计时，避免挂机拉高平均用时
 - 结束后记录正确率、平均用时、历史最佳，并发放 XP
 - 输入框兼容全角数字、中文逗号和百分号
+
+## 资料分析公式
+
+设置页之外，首页「专项训练 → 资料分析公式」提供 15 个高频公式：
+
+- **增长**:增长率、增长量、基期量、现期量、隔年增长率、年均增长量、年均增长率
+- **比重**:比重、部分量、整体量、百分点
+- **平均与倍数**:平均数、倍数
+- **综合**:混合增长率、增长贡献率
+
+公式列表支持「背诵模式」隐藏公式，点击条目查看；「公式测验」会随机抽 10 个公式，用四选一检验记忆，并展示错题解析。
+
+## 每日提醒
+
+打开首页右上角 ⚙️ → 「每日提醒」：
+
+- 选择时间并开启，授权通知权限后，每天按手机本地时区提醒
+- 修改时间会取消旧计划并重新调度
+- Android 13+ 首次开启会请求 `POST_NOTIFICATIONS` 权限
+- 桌面端暂不支持系统定时通知，设置页会给出提示
+- 提醒设置保存在本机 `localStorage`，换机会重新设置
 
 ## 游戏化参数
 
@@ -171,7 +232,7 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 | 选择题 | `1`–`6` 或 `A`–`F` 作答 |
 | 选择题 | `Enter` / `Space` 下一题 |
 | 计算训练 | `Enter` 提交 / 下一题 |
-| 任意页面 | `Esc` 返回 / 退出训练 |
+| 答题 / 训练 / 公式测验 | `Esc` 返回 / 退出 |
 | 弹窗 | `Enter` 确认，`Esc` 取消 |
 
 ## 项目结构
@@ -189,7 +250,9 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 │   ├── capabilities/       # Tauri 权限
 │   ├── tauri.conf.json
 │   └── Cargo.toml
-├── .github/workflows/      # Android CI
+├── .github/workflows/      # Android CI（含固定签名）
+├── scripts/
+│   └── configure-android-signing.py  # 给生成工程注入 release 签名
 ├── build.sh
 └── app-icon.png            # 图标源文件(1024×1024)
 ```

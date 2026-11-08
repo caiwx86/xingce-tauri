@@ -391,7 +391,18 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 43] = [
     ),
 ];
 
-const FORMULA_EXERCISES: [(&str, &str, &str, &str, f64, f64, &str, &str); 25] = [
+type FormulaExerciseDef = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    f64,
+    f64,
+    &'static str,
+    &'static str,
+);
+
+const FORMULA_EXERCISES: [FormulaExerciseDef; 25] = [
     (
         "growth-rate",
         "资料",

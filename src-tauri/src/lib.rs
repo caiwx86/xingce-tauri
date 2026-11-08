@@ -12,6 +12,7 @@ use tauri::{Manager, State};
 const CATS: [&str; 5] = ["言语理解", "数量关系", "判断推理", "资料分析", "常识判断"];
 const DAILY_COUNT: usize = 5;
 const SMART_REVIEW_LIMIT: usize = 20;
+const HISTORY_LIMIT: usize = 500;
 /// 艾宾浩斯复习间隔（天）：新学 -> 1 -> 2 -> 4 -> 7 -> 15 -> 30 -> 60
 const REVIEW_INTERVALS: [i64; 8] = [0, 1, 2, 4, 7, 15, 30, 60];
 const PROGRESS_FILE: &str = "progress.json";
@@ -390,6 +391,259 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 43] = [
     ),
 ];
 
+const FORMULA_EXERCISES: [(&str, &str, &str, &str, f64, f64, &str, &str); 25] = [
+    (
+        "growth-rate",
+        "资料",
+        "增长率",
+        "基期量为500，现期量为600，增长率是多少？",
+        20,
+        0.06,
+        "%",
+        "（600−500）÷500=20%。",
+    ),
+    (
+        "growth-amount",
+        "资料",
+        "增长量",
+        "基期量为500，同比增长20%，增长量是多少？",
+        100,
+        0.0,
+        "",
+        "500×20%=100。",
+    ),
+    (
+        "base-value",
+        "资料",
+        "基期量",
+        "现期量为600，同比增长20%，基期量是多少？",
+        500,
+        0.0,
+        "",
+        "600÷1.2=500。",
+    ),
+    (
+        "current-value",
+        "资料",
+        "现期量",
+        "基期量为500，同比增长20%，现期量是多少？",
+        600,
+        0.0,
+        "",
+        "500×1.2=600。",
+    ),
+    (
+        "inter-year",
+        "资料",
+        "隔年增长率",
+        "连续两年分别增长10%和20%，隔年增长率是多少？",
+        32,
+        0.06,
+        "%",
+        "10%+20%+10%×20%=32%。",
+    ),
+    (
+        "annual-amount",
+        "资料",
+        "年均增长量",
+        "初期量100，5年后为160，年均增长量是多少？",
+        12,
+        0.0,
+        "",
+        "（160−100）÷5=12。",
+    ),
+    (
+        "annual-rate",
+        "资料",
+        "年均增长率",
+        "初期量100，2年后为121，年均增长率是多少？",
+        10,
+        0.06,
+        "%",
+        "（121÷100）^(1/2)−1=10%。",
+    ),
+    (
+        "ratio",
+        "资料",
+        "比重",
+        "部分量180，整体量600，比重是多少？",
+        30,
+        0.06,
+        "%",
+        "180÷600=30%。",
+    ),
+    (
+        "part-value",
+        "资料",
+        "部分量",
+        "整体量600，比重30%，部分量是多少？",
+        180,
+        0.0,
+        "",
+        "600×30%=180。",
+    ),
+    (
+        "whole-value",
+        "资料",
+        "整体量",
+        "部分量180，比重30%，整体量是多少？",
+        600,
+        0.0,
+        "",
+        "180÷30%=600。",
+    ),
+    (
+        "percentage-point",
+        "资料",
+        "百分点",
+        "比重从30%提高到35%，提高了多少个百分点？",
+        5,
+        0.0,
+        "",
+        "35−30=5个百分点。",
+    ),
+    (
+        "average",
+        "资料",
+        "平均数",
+        "总量240，份数6，平均数是多少？",
+        40,
+        0.0,
+        "",
+        "240÷6=40。",
+    ),
+    (
+        "multiple",
+        "资料",
+        "倍数",
+        "A=240，B=60，A是B的多少倍？",
+        4,
+        0.0,
+        "",
+        "240÷60=4。",
+    ),
+    (
+        "contribution",
+        "资料",
+        "增长贡献率",
+        "整体增长量100，某部分增长量30，增长贡献率是多少？",
+        30,
+        0.06,
+        "%",
+        "30÷100=30%。",
+    ),
+    (
+        "work-time",
+        "数量",
+        "合作时间",
+        "工作总量120，合作效率30，合作时间是多少？",
+        4,
+        0.0,
+        "天",
+        "120÷30=4天。",
+    ),
+    (
+        "distance",
+        "数量",
+        "路程",
+        "速度60，时间2，路程是多少？",
+        120,
+        0.0,
+        "",
+        "60×2=120。",
+    ),
+    (
+        "meeting",
+        "数量",
+        "相遇时间",
+        "路程和120，速度和60，相遇时间是多少？",
+        2,
+        0.0,
+        "小时",
+        "120÷60=2小时。",
+    ),
+    (
+        "catch-up",
+        "数量",
+        "追及时间",
+        "路程差200，速度差2，追及时间是多少？",
+        100,
+        0.0,
+        "秒",
+        "200÷2=100秒。",
+    ),
+    (
+        "profit-rate",
+        "数量",
+        "利润率",
+        "成本100，售价120，利润率是多少？",
+        20,
+        0.06,
+        "%",
+        "（120−100）÷100=20%。",
+    ),
+    (
+        "discount",
+        "数量",
+        "折扣",
+        "售价120，标价150，折扣是多少？",
+        80,
+        0.06,
+        "%",
+        "120÷150=80%，即八折。",
+    ),
+    (
+        "concentration",
+        "数量",
+        "浓度",
+        "溶质20，溶液100，浓度是多少？",
+        20,
+        0.06,
+        "%",
+        "20÷100=20%。",
+    ),
+    (
+        "combination",
+        "数量",
+        "组合数",
+        "C(5,3)是多少？",
+        10,
+        0.0,
+        "",
+        "5×4×3÷（3×2×1）=10。",
+    ),
+    (
+        "inclusion-exclusion",
+        "数量",
+        "两集合容斥",
+        "|A|=30，|B|=25，|A∩B|=10，|A∪B|是多少？",
+        45,
+        0.0,
+        "",
+        "30+25−10=45。",
+    ),
+    (
+        "arithmetic-term",
+        "数量",
+        "等差数列通项",
+        "等差数列首项3，公差4，第10项是多少？",
+        39,
+        0.0,
+        "",
+        "3+9×4=39。",
+    ),
+    (
+        "chicken-rabbit",
+        "数量",
+        "鸡兔同笼",
+        "35个头、94只脚，兔有多少只？",
+        12,
+        0.0,
+        "只",
+        "（94−70）÷2=12只。",
+    ),
+];
+
 /* ---------------- 游戏化常量 ---------------- */
 
 const DAILY_GOAL: u32 = 20; // 每日目标题数
@@ -432,6 +686,106 @@ const ACHV: [(&str, &str, &str, &str); 13] = [
     ("daily", "📅", "挑战者", "完成一次每日挑战"),
     ("lvl5", "📈", "升职加薪", "升到 5 级"),
     ("clean", "🧹", "错题清零", "清空错题本"),
+];
+
+/// (id, 图标, 名称, 说明, 解锁提示, 稀有度)
+const ANIMALS: [(&str, &str, &str, &str, &str, &str); 12] = [
+    (
+        "cat",
+        "🐱",
+        "小猫",
+        "喜欢趴在书页上陪你刷题。",
+        "完成第一道题",
+        "普通",
+    ),
+    (
+        "dog",
+        "🐶",
+        "小狗",
+        "每天提醒你按时打卡。",
+        "累计答题 30 道",
+        "普通",
+    ),
+    (
+        "rabbit",
+        "🐰",
+        "小兔",
+        "跳一跳，正确率更高。",
+        "累计答题 80 道",
+        "普通",
+    ),
+    (
+        "panda",
+        "🐼",
+        "熊猫",
+        "慢悠悠但很稳，适合打基础。",
+        "升到 3 级",
+        "稀有",
+    ),
+    (
+        "fox",
+        "🦊",
+        "狐狸",
+        "擅长资料分析的机灵鬼。",
+        "连续打卡 7 天",
+        "稀有",
+    ),
+    (
+        "koala",
+        "🐨",
+        "考拉",
+        "困了也要复习完再睡。",
+        "累计答题 150 道",
+        "稀有",
+    ),
+    (
+        "tiger",
+        "🐯",
+        "小老虎",
+        "连对 10 题就会啸一声。",
+        "连续答对 10 题",
+        "稀有",
+    ),
+    (
+        "lion",
+        "🦁",
+        "狮子",
+        "职级达到 8 级解锁。",
+        "升到 8 级",
+        "史诗",
+    ),
+    (
+        "frog",
+        "🐸",
+        "青蛙",
+        "完成每日挑战后跳出来。",
+        "完成一次每日挑战",
+        "稀有",
+    ),
+    (
+        "penguin",
+        "🐧",
+        "企鹅",
+        "连续打卡 30 天，南极也坚持。",
+        "连续打卡 30 天",
+        "史诗",
+    ),
+    (
+        "unicorn",
+        "🦄",
+        "独角兽",
+        "计算训练 10 题全对时出现。",
+        "计算训练 10 题以上全对",
+        "传说",
+    ),
+    (
+        "dragon",
+        "🐉",
+        "小龙",
+        "累计答题 500 道，传说伙伴。",
+        "累计答题 500 道",
+        "传说",
+    ),
 ];
 
 fn level_of(xp: u32) -> u32 {
@@ -571,6 +925,18 @@ struct DrillStat {
     best_avg_secs: Option<f64>,
 }
 
+#[derive(Default, Serialize, Deserialize, Clone)]
+#[serde(default)]
+struct HistoryLog {
+    id: u32,
+    category: String,
+    correct: bool,
+    choice: usize,
+    answer: usize,
+    day: String,
+    mode: String,
+}
+
 #[derive(Default, Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 struct ReviewState {
@@ -606,6 +972,10 @@ struct Progress {
     // 艾宾浩斯复习
     review: BTreeMap<u32, ReviewState>,
     formula_review: BTreeMap<String, ReviewState>,
+    // 可爱动物收集
+    animals: BTreeSet<String>,
+    // 答题历史（最多 HISTORY_LIMIT 条）
+    history: Vec<HistoryLog>,
 }
 
 struct AppState {
@@ -734,6 +1104,16 @@ fn load_questions() -> Result<Vec<Question>, String> {
 /* ---------------- 奖励与打卡 ---------------- */
 
 #[derive(Serialize, Clone)]
+struct AnimalInfo {
+    id: &'static str,
+    icon: &'static str,
+    name: &'static str,
+    desc: &'static str,
+    hint: &'static str,
+    rarity: &'static str,
+}
+
+#[derive(Serialize, Clone)]
 struct AchvInfo {
     id: &'static str,
     icon: &'static str,
@@ -750,6 +1130,7 @@ struct AwardInfo {
     goal_hit: bool,
     streak: u32,
     new_achv: Vec<AchvInfo>,
+    new_animals: Vec<AnimalInfo>,
 }
 
 #[derive(Default)]
@@ -827,6 +1208,24 @@ fn live_streak(p: &Progress, today: &str) -> u32 {
     }
 }
 
+fn animal_unlocked(id: &str, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
+    match id {
+        "cat" => total >= 1,
+        "dog" => total >= 30,
+        "rabbit" => total >= 80,
+        "panda" => level >= 3,
+        "fox" => p.best_streak >= 7,
+        "koala" => total >= 150,
+        "tiger" => ev.combo >= 10,
+        "lion" => level >= 8,
+        "frog" => !p.daily_done.is_empty(),
+        "penguin" => p.best_streak >= 30,
+        "unicorn" => ev.drill.is_some_and(|(t, r, _)| t >= 10 && r == t),
+        "dragon" => total >= 500,
+        _ => false,
+    }
+}
+
 /// 结算一次事件：经验、等级、每日目标、连续打卡、成就
 fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
     touch(p, today);
@@ -891,6 +1290,21 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
         unlock(p, &mut ids, id);
     }
 
+    let mut new_animals = Vec::new();
+    for &(id, icon, name, desc, hint, rarity) in ANIMALS.iter() {
+        if !p.animals.contains(id) && animal_unlocked(id, p, total, level, &ev) {
+            p.animals.insert(id.to_string());
+            new_animals.push(AnimalInfo {
+                id,
+                icon,
+                name,
+                desc,
+                hint,
+                rarity,
+            });
+        }
+    }
+
     AwardInfo {
         xp: gained,
         level,
@@ -899,6 +1313,7 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
         goal_hit,
         streak: p.streak,
         new_achv: ids.iter().filter_map(|id| achv_info(id)).collect(),
+        new_animals,
     }
 }
 
@@ -1019,6 +1434,7 @@ fn submit_answer(
     choice: usize,
     combo: u32,
     today: String,
+    mode: String,
 ) -> Result<AnswerResult, String> {
     require_day(&today)?;
     let q = state
@@ -1045,6 +1461,20 @@ fn submit_answer(
     let today_num = day_num(&today).unwrap_or(0);
     let review = p.review.entry(id).or_default();
     update_review(review, correct, today_num);
+
+    p.history.push(HistoryLog {
+        id,
+        category: q.category.clone(),
+        correct,
+        choice,
+        answer: q.answer,
+        day: today.clone(),
+        mode,
+    });
+    if p.history.len() > HISTORY_LIMIT {
+        let keep_from = p.history.len() - HISTORY_LIMIT;
+        p.history.drain(0..keep_from);
+    }
 
     let new_combo = if correct { combo.saturating_add(1) } else { 0 };
     let base = if correct {
@@ -1111,11 +1541,71 @@ fn get_stats(state: State<AppState>) -> Progress {
 }
 
 #[derive(Serialize)]
+struct HistoryItem {
+    id: u32,
+    category: String,
+    stem: String,
+    options: Vec<String>,
+    choice: usize,
+    answer: usize,
+    explanation: String,
+    correct: bool,
+    day: String,
+    mode: String,
+}
+
+#[tauri::command]
+fn get_history(state: State<AppState>, limit: Option<u32>) -> Vec<HistoryItem> {
+    let p = state.progress();
+    let limit = limit.unwrap_or(200).min(HISTORY_LIMIT as u32) as usize;
+    p.history
+        .iter()
+        .rev()
+        .take(limit)
+        .map(|h| {
+            let q = state.questions.iter().find(|q| q.id == h.id);
+            HistoryItem {
+                id: h.id,
+                category: h.category.clone(),
+                stem: q
+                    .map(|q| q.stem.clone())
+                    .unwrap_or_else(|| "题目已从题库移除".into()),
+                options: q.map(|q| q.options.clone()).unwrap_or_default(),
+                choice: h.choice,
+                answer: h.answer,
+                explanation: q.map(|q| q.explanation.clone()).unwrap_or_default(),
+                correct: h.correct,
+                day: h.day.clone(),
+                mode: h.mode.clone(),
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn clear_history(state: State<AppState>) {
+    let mut p = state.progress();
+    p.history.clear();
+    state.save(&p);
+}
+
+#[derive(Serialize)]
 struct AchvView {
     id: &'static str,
     icon: &'static str,
     name: &'static str,
     desc: &'static str,
+    unlocked: bool,
+}
+
+#[derive(Serialize)]
+struct AnimalView {
+    id: &'static str,
+    icon: &'static str,
+    name: &'static str,
+    desc: &'static str,
+    hint: &'static str,
+    rarity: &'static str,
     unlocked: bool,
 }
 
@@ -1138,6 +1628,10 @@ struct Profile {
     new_questions: usize,
     formula_due: usize,
     formula_total: usize,
+    animal_count: usize,
+    animal_total: usize,
+    history_count: usize,
+    animals: Vec<AnimalView>,
     achievements: Vec<AchvView>,
 }
 
@@ -1172,6 +1666,21 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
         new_questions,
         formula_due,
         formula_total: p.formula_review.len(),
+        animal_count: p.animals.len(),
+        animal_total: ANIMALS.len(),
+        history_count: p.history.len(),
+        animals: ANIMALS
+            .iter()
+            .map(|&(id, icon, name, desc, hint, rarity)| AnimalView {
+                id,
+                icon,
+                name,
+                desc,
+                hint,
+                rarity,
+                unlocked: p.animals.contains(id),
+            })
+            .collect(),
         achievements: ACHV
             .iter()
             .map(|&(id, icon, name, desc)| AchvView {
@@ -1560,6 +2069,37 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
 }
 
 #[derive(Serialize)]
+struct FormulaExercise {
+    id: &'static str,
+    group: &'static str,
+    title: &'static str,
+    text: &'static str,
+    answer: f64,
+    tol: f64,
+    unit: &'static str,
+    explanation: &'static str,
+}
+
+#[tauri::command]
+fn list_formula_exercises() -> Vec<FormulaExercise> {
+    FORMULA_EXERCISES
+        .iter()
+        .map(
+            |&(id, group, title, text, answer, tol, unit, explanation)| FormulaExercise {
+                id,
+                group,
+                title,
+                text,
+                answer,
+                tol,
+                unit,
+                explanation,
+            },
+        )
+        .collect()
+}
+
+#[derive(Serialize)]
 struct FormulaInfo {
     id: &'static str,
     group: &'static str,
@@ -1717,10 +2257,13 @@ pub fn run() {
             submit_answer,
             claim_daily,
             get_stats,
+            get_history,
+            clear_history,
             get_profile,
             get_review_plan,
             reset_progress,
             list_formulas,
+            list_formula_exercises,
             record_formula,
             list_drills,
             gen_drill,
@@ -1801,6 +2344,48 @@ mod tests {
         }
         assert_eq!(st.stage, 7);
         assert!(count_due(&BTreeMap::from([(1u32, st)]), 400) >= 1);
+    }
+
+    #[test]
+    fn formula_exercises_are_sane() {
+        let total = FORMULA_EXERCISES.len();
+        assert_eq!(total, 25);
+        for &(id, group, title, text, answer, tol, unit, explanation) in FORMULA_EXERCISES.iter() {
+            assert!(
+                FORMULAS.iter().any(|f| f.0 == id),
+                "公式实操引用了不存在的公式：{id}"
+            );
+            assert!(group == "资料" || group == "数量", "{id} 分组未知");
+            assert!(!title.trim().is_empty(), "{id} 标题为空");
+            assert!(!text.trim().is_empty(), "{id} 题目为空");
+            assert!(answer.is_finite(), "{id} 答案不是有限数");
+            assert!(tol >= 0.0, "{id} 容差为负");
+            assert!(unit.chars().count() <= 2, "{id} 单位异常");
+            assert!(!explanation.trim().is_empty(), "{id} 解析为空");
+        }
+    }
+
+    #[test]
+    fn animal_unlocks_follow_progress() {
+        let p = Progress {
+            best_streak: 7,
+            daily_done: "2026-11-09".into(),
+            ..Default::default()
+        };
+        let ev = Event {
+            combo: 10,
+            drill: Some((10, 10, 60.0)),
+            ..Default::default()
+        };
+        assert!(animal_unlocked("cat", &p, 10, 3, &ev));
+        assert!(animal_unlocked("panda", &p, 10, 3, &ev));
+        assert!(animal_unlocked("fox", &p, 10, 3, &ev));
+        assert!(animal_unlocked("tiger", &p, 10, 3, &ev));
+        assert!(animal_unlocked("frog", &p, 10, 3, &ev));
+        assert!(animal_unlocked("unicorn", &p, 10, 3, &ev));
+        assert!(!animal_unlocked("dog", &p, 10, 3, &ev));
+        assert!(!animal_unlocked("lion", &p, 10, 3, &ev));
+        assert!(!animal_unlocked("dragon", &p, 10, 3, &ev));
     }
 
     #[test]

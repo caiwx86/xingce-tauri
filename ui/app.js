@@ -89,6 +89,44 @@ function shuffle(xs) {
   }
   return a;
 }
+const FACTS = [
+  "资料分析先读问题再找数据，通常比从头读到尾更快。",
+  "增长率题先估基期，再和选项对量级，往往能排除一半答案。",
+  "连续学习 25 分钟后休息 5 分钟，比一口气刷两小时更稳。",
+  "猫每天平均睡 12–16 小时，但捕猎时爆发力很强。",
+  "企鹅的膝盖藏在羽毛里，腿其实并不短。",
+  "熊猫每天要吃约 12–38 公斤竹子，是名副其实的“吃货”。",
+  "狐狸的大耳朵既能散热，也能听清雪下的小动静。",
+  "章鱼有三颗心脏，血液是蓝色的。",
+  "蜜蜂会用舞蹈告诉同伴花蜜的方向和距离。",
+  "树懒一周才下树一次，行动慢是为了节省能量。",
+  "数量关系先看选项量级，常能排除一半错误答案。",
+  "每天固定时间复习，比随机刷题更容易形成长期记忆。",
+];
+
+function factOfDay() {
+  const d = new Date();
+  const key = d.getFullYear() * 372 + (d.getMonth() + 1) * 31 + d.getDate();
+  return FACTS[key % FACTS.length];
+}
+
+const TRICKS = [
+  { cat: "基础运算", name: "凑整法", tip: "把一个数拆成整十、整百再加减，减少进位借位。", example: "397+256 = 400+256−3 = 653。" },
+  { cat: "基础运算", name: "拆分法", tip: "把乘数拆成整十数加个位数，分别相乘再相加。", example: "24×15 = 24×10 + 24×5 = 240+120 = 360。" },
+  { cat: "基础运算", name: "×11 速算", tip: "首尾拉开，中间相邻位相加，注意进位。", example: "35×11 = 3（3+5）5 = 385。" },
+  { cat: "基础运算", name: "×15 速算", tip: "先乘10，再加一半。", example: "48×15 = 480+240 = 720。" },
+  { cat: "基础运算", name: "×25 速算", tip: "先除以4，再乘100。", example: "36×25 = 36÷4×100 = 900。" },
+  { cat: "基础运算", name: "×125 速算", tip: "先除以8，再乘1000。", example: "32×125 = 32÷8×1000 = 4000。" },
+  { cat: "基础运算", name: "个位是5的平方", tip: "十位×（十位+1）后接25。", example: "35² → 3×4=12 → 1225。" },
+  { cat: "基础运算", name: "(a±b)² 展开", tip: "拆成整十数加减，利用完全平方公式。", example: "23² = 20²+2×20×3+3² = 529。" },
+  { cat: "基础运算", name: "除法化乘", tip: "÷5=×2÷10，÷25=×4÷100，÷125=×8÷1000。", example: "240÷5 = 240×2÷10 = 48。" },
+  { cat: "资料分析", name: "特征数字法", tip: "把常见百分数换成分数，减少除法。", example: "1/3≈33.3%，1/7≈14.3%，1/8=12.5%，1/9≈11.1%。" },
+  { cat: "资料分析", name: "截位直除", tip: "分子分母各保留前三位，估算首两位，先定量级。", example: "4821÷63.2 ≈ 4800÷63 ≈ 76。" },
+  { cat: "资料分析", name: "尾数法", tip: "加减法只算末位，快速排除选项。", example: "387+245+169 的末位 = 7+5+9 = 21，末位是1。" },
+  { cat: "资料分析", name: "首数法", tip: "除法先看首位商几，再结合选项缩小范围。", example: "813÷27，首位约3，因为27×30=810。" },
+  { cat: "资料分析", name: "化同/差分比较", tip: "分数比较可交叉相乘；接近时可比较差值。", example: "比较 17/23 与 18/25：17×25=425 > 18×23=414，所以 17/23 > 18/25。" },
+];
+
 const FORMULA_SCOPES = [
   { id: "all", label: "全部" },
   { id: "data", label: "资料分析" },
@@ -376,6 +414,17 @@ function celebrate(a) {
       for (const x of a.new_achv || []) {
         await celebrateModal(x.icon, "解锁成就：" + x.name, x.desc);
       }
+      const newAnimals = a.new_animals || [];
+      if (newAnimals.length === 1) {
+        const x = newAnimals[0];
+        await celebrateModal(x.icon, "邂逅新伙伴：" + x.name, `${x.rarity} · ${x.desc}`);
+      } else if (newAnimals.length > 1) {
+        await celebrateModal(
+          "🐾",
+          `邂逅 ${newAnimals.length} 位新伙伴`,
+          newAnimals.map((x) => `${x.icon}${x.name}`).join("、")
+        );
+      }
     })
     .catch((err) => console.error("celebrate", err));
 }
@@ -411,6 +460,8 @@ function profileCard(p) {
   const xpPct = maxed ? 100 : Math.min(100, ((p.xp - p.level_floor) / span) * 100);
   const goalPct = Math.min(100, (p.today_count / Math.max(1, p.goal)) * 100);
   const goalDone = p.today_count >= p.goal;
+  const buddies = (p.animals || []).filter((a) => a.unlocked);
+  const buddy = buddies[buddies.length - 1];
 
   return h(
     "div",
@@ -440,7 +491,17 @@ function profileCard(p) {
       h("span", {}, goalDone ? "✅ 今日目标已达成" : `今日目标 ${p.today_count} / ${p.goal} 题`),
       h("span", {}, goalDone ? "" : "+20 XP")
     ),
-    h("div", { class: "bar2 g" + (goalDone ? " done" : "") }, h("i", { style: `width:${goalPct}%` }))
+    h("div", { class: "bar2 g" + (goalDone ? " done" : "") }, h("i", { style: `width:${goalPct}%` })),
+    h(
+      "div",
+      { class: "pmeta companion" },
+      h(
+        "span",
+        {},
+        buddy ? `🐾 ${buddy.icon} ${buddy.name} 在陪你刷题` : "完成第一题，领养第一位动物伙伴"
+      ),
+      h("span", {}, p.animal_count ? `${p.animal_count}/${p.animal_total} 位伙伴` : "")
+    )
   );
 }
 
@@ -451,6 +512,7 @@ async function renderHome() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
   formulaScope = "all";
 
   let cats, st, pf, formulas;
@@ -477,6 +539,42 @@ async function renderHome() {
   const right = catRight + drillRight;
   const wrongs = st.wrong?.length || 0;
   const got = pf.achievements.filter((a) => a.unlocked).length;
+
+  const dailyNode = card(
+    "📅 每日挑战",
+    pf.daily_done ? "今日已完成 ✓ 明天再来" : "5 道精选题 · 完成额外 +30 XP",
+    () => start("每日挑战"),
+    pf.daily_done ? "" : "hot"
+  );
+  const smartNode = card(
+    "🧠 智能复习",
+    `今日到期 ${pf.review_due} 题 · 新题 ${pf.new_questions} 题`,
+    () => start("智能复习"),
+    pf.review_due > 0 ? "hot" : ""
+  );
+  const quickNode = card("⚡ 快速练习", "随机 10 题 · 跨题型热身", () =>
+    start("全部", { limit: 10, shuffle: true, label: "快速练习" })
+  );
+
+  const todayCandidates = [];
+  if (pf.review_due > 0) todayCandidates.push(smartNode);
+  if (!pf.daily_done) todayCandidates.push(dailyNode);
+  todayCandidates.push(quickNode);
+  if (pf.daily_done) todayCandidates.push(dailyNode);
+  const primaryToday = todayCandidates[0];
+  const secondaryToday = todayCandidates.slice(1, 3);
+  const secondaryBlock =
+    secondaryToday.length === 0
+      ? null
+      : secondaryToday.length === 1
+        ? h("div", { class: "list" }, secondaryToday)
+        : h("div", { class: "grid2" }, secondaryToday);
+  const todayNote =
+    pf.review_due > 0
+      ? `先清 ${pf.review_due} 道到期复习`
+      : pf.daily_done
+        ? "今日任务已完成，随便练几题保持手感"
+        : "完成 20 题即达标";
 
   screen(
     h(
@@ -507,31 +605,17 @@ async function renderHome() {
       h("span", {}, `错题 ${wrongs}`),
       h("span", {}, `待复习 ${pf.review_due}`)
     ),
+    h(
+      "div",
+      { class: "fact-card" },
+      h("div", { class: "fact-title" }, "🐾 今日小知识"),
+      h("p", {}, factOfDay())
+    ),
     section(
       "今日",
-      "完成 20 题即达标",
-      h(
-        "div",
-        { class: "list" },
-        card(
-          "📅 每日挑战",
-          pf.daily_done ? "今日已完成 ✓ 明天再来" : "5 道精选题 · 完成额外 +30 XP",
-          () => start("每日挑战"),
-          pf.daily_done ? "" : "hot"
-        )
-      ),
-      h(
-        "div",
-        { class: "grid2" },
-        card("⚡ 快速练习", "随机 10 题 · 跨题型热身", () =>
-          start("全部", { limit: 10, shuffle: true, label: "快速练习" })
-        ),
-        card(
-          "🧠 智能复习",
-          `今日到期 ${pf.review_due} 题 · 新题 ${pf.new_questions} 题`,
-          () => start("智能复习")
-        )
-      )
+      todayNote,
+      h("div", { class: "list" }, primaryToday),
+      secondaryBlock
     ),
     section(
       "专项训练",
@@ -539,12 +623,12 @@ async function renderHome() {
       h(
         "div",
         { class: "grid2" },
-        card("🧮 计算训练", "21 类速算 · 10/20/30 题", renderDrillMenu),
+        card("🧮 计算训练", "21 类速算 · 14 个技巧", renderDrillMenu),
         card(
           "🧠 公式背诵",
           pf.formula_due
             ? `${formulas.length} 个公式 · 今日待复习 ${pf.formula_due} 个`
-            : `${formulas.length} 个公式 · 背诵卡 + 测验`,
+            : `${formulas.length} 个公式 · 背诵 + 实操`,
           renderFormulaList,
           "hot"
         )
@@ -555,26 +639,33 @@ async function renderHome() {
       `${totalQ} 题 · 五大分类`,
       h(
         "div",
-        { class: "grid2" },
-        card("📚 全部题型", `${totalQ} 题`, () => start("全部"), "wide"),
+        { class: "list" },
+        card("📚 全部题型", `${totalQ} 题 · 随机顺序`, () => start("全部"))
+      ),
+      h(
+        "div",
+        { class: "cat-chips" },
         cats.map((c) => {
           const s = st.stats?.[c.name] || { done: 0, right: 0 };
-          return card(
-            c.name,
-            `${c.count} 题` + (s.done ? ` · 正确率 ${pct(s.right, s.done)}` : ""),
-            () => start(c.name)
+          return h(
+            "button",
+            { class: "cat-chip", type: "button", onclick: () => start(c.name) },
+            h("b", {}, c.name),
+            h("span", {}, `${c.count} 题` + (s.done ? ` · ${pct(s.right, s.done)}` : ""))
           );
         })
       )
     ),
     section(
-      "复习与成就",
-      "错题 · 徽章",
+      "我的",
+      "错题 · 伙伴 · 记录",
       h(
         "div",
         { class: "grid2" },
         card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
         card("🏅 成就", `已解锁 ${got} / ${pf.achievements.length}`, renderAchv),
+        card("🐾 动物乐园", `${pf.animal_count} / ${pf.animal_total} 位伙伴`, renderAnimals),
+        card("📜 历史记录", `${pf.history_count} 条 · 最近答题`, renderHistory),
         card("📈 复习计划", "艾宾浩斯曲线 · 未来 7 天预测", renderReviewPlan, "wide")
       )
     )
@@ -605,6 +696,7 @@ function renderSettings() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
 
   const r = readReminder();
   const enabled = IS_MOBILE && r.enabled;
@@ -739,7 +831,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.4.0 · 80 道题库 · 21 类速算 · 43 个公式")
+          h("div", { class: "d" }, "0.5.0 · 80 道题库 · 21 类速算 · 43 个公式 · 12 位动物伙伴")
         )
       )
     ),
@@ -758,6 +850,7 @@ async function renderReviewPlan() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
 
   let plan;
   try {
@@ -806,6 +899,7 @@ async function renderReviewPlan() {
       { class: "actions" },
       h("button", { class: "primary", type: "button", onclick: () => start("智能复习") }, "开始智能复习"),
       h("button", { class: "link", type: "button", onclick: startFormulaCards }, "公式背诵卡"),
+      h("button", { class: "link", type: "button", onclick: startFormulaPractice }, "公式实操"),
       h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
     )
   );
@@ -818,6 +912,7 @@ async function renderAchv() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
   let pf;
   try {
     pf = await call("get_profile", { today: today() });
@@ -848,6 +943,183 @@ async function renderAchv() {
   );
 }
 
+async function renderAnimals() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let pf;
+  try {
+    pf = await call("get_profile", { today: today() });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+  const got = pf.animals.filter((a) => a.unlocked).length;
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span")
+    ),
+    h("h1", {}, "动物乐园"),
+    h("p", { class: "sub" }, `已领养 ${got} / ${pf.animal_total} 位伙伴 · 答题、打卡、升级都会遇到新朋友`),
+    h("div", { class: "progress" }, h("i", { style: `width:${(got / Math.max(1, pf.animal_total)) * 100}%` })),
+    h(
+      "div",
+      { class: "agrid" },
+      pf.animals.map((a) =>
+        h(
+          "div",
+          { class: "badge animal" + (a.unlocked ? "" : " locked") },
+          h("div", { class: "bicon", "aria-hidden": "true" }, a.unlocked ? a.icon : "🥚"),
+          h("div", { class: "bname" }, a.name),
+          h("div", { class: "ararity" }, a.unlocked ? a.rarity : `${a.rarity} · 未解锁`),
+          h("div", { class: "bdesc" }, a.unlocked ? a.desc : a.hint)
+        )
+      )
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "primary", type: "button", onclick: () => start("智能复习") }, "去刷题找伙伴"),
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+    )
+  );
+}
+
+async function renderHistory() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let items;
+  try {
+    items = await call("get_history", { limit: 500 });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+
+  const correct = items.filter((x) => x.correct).length;
+  const filtered = historyFilter === "wrong" ? items.filter((x) => !x.correct) : items;
+  const historyItem = (item, idx) => {
+    const your =
+      item.options[item.choice] != null
+        ? `${String.fromCharCode(65 + item.choice)}. ${item.options[item.choice]}`
+        : "未记录";
+    const answer =
+      item.options[item.answer] != null
+        ? `${String.fromCharCode(65 + item.answer)}. ${item.options[item.answer]}`
+        : "题目已移除";
+    return h(
+      "details",
+      { class: "review" + (item.correct ? " ok" : " bad") },
+      h(
+        "summary",
+        {},
+        h("span", { class: "ricon", "aria-hidden": "true" }, item.correct ? "✓" : "✗"),
+        h(
+          "span",
+          { class: "rstem" },
+          `${idx + 1}. ${item.day} · ${item.mode} · ${item.category}
+${item.stem}`
+        )
+      ),
+      h(
+        "div",
+        { class: "rbody" },
+        h("div", { class: "rrow" }, h("b", {}, "你的答案"), h("span", {}, your)),
+        h("div", { class: "rrow" }, h("b", {}, "正确答案"), h("span", { class: "ok-text" }, answer)),
+        h("div", { class: "rexp" }, item.explanation || "该题已从题库移除，暂无解析。")
+      )
+    );
+  };
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span")
+    ),
+    h("h1", {}, "答题记录"),
+    h(
+      "p",
+      { class: "sub" },
+      items.length
+        ? `最近 ${items.length} 条 · 正确率 ${pct(correct, items.length)}`
+        : "还没有答题记录，先去做几道题吧。"
+    ),
+    h(
+      "div",
+      { class: "chips scope-chips" },
+      h(
+        "button",
+        {
+          class: "chip" + (historyFilter === "all" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            historyFilter = "all";
+            renderHistory();
+          },
+        },
+        "全部"
+      ),
+      h(
+        "button",
+        {
+          class: "chip" + (historyFilter === "wrong" ? " on" : ""),
+          type: "button",
+          onclick: () => {
+            historyFilter = "wrong";
+            renderHistory();
+          },
+        },
+        "只看错题"
+      )
+    ),
+    filtered.length
+      ? h("div", { class: "reviews" }, filtered.map(historyItem))
+      : h("p", { class: "sub" }, historyFilter === "wrong" ? "没有错题记录，很棒！" : "暂无记录。"),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link danger", type: "button", onclick: clearHistory }, "清空答题记录"),
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+    )
+  );
+}
+
+async function clearHistory() {
+  const ok = await confirmDialog({
+    icon: "📜",
+    title: "清空答题记录？",
+    desc: "只清空历史记录，不影响错题本、经验、复习计划和统计数据。",
+    ok: "确认清空",
+  });
+  if (!ok) return;
+  try {
+    await call("clear_history");
+  } catch {
+    return;
+  }
+  toast("已清空答题记录");
+  renderHistory();
+}
+
 /* ---------------- 资料分析公式 ---------------- */
 
 async function renderFormulaList() {
@@ -857,6 +1129,7 @@ async function renderFormulaList() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
 
   let formulas;
   try {
@@ -934,6 +1207,7 @@ async function renderFormulaList() {
         h("button", { class: "chip", type: "button", onclick: startFormulaCards }, "🃏 背诵卡"),
         h("button", { class: "chip", type: "button", onclick: renderFormulaPoster }, "🗺️ 一览图")
       ),
+      h("button", { class: "chip", type: "button", onclick: startFormulaPractice }, "🧮 公式实操"),
       h(
         "button",
         {
@@ -960,6 +1234,7 @@ async function renderFormulaPoster() {
   D = null;
   F = null;
   FC = null;
+  FP = null;
 
   let formulas;
   try {
@@ -1012,6 +1287,7 @@ async function renderFormulaPoster() {
       "div",
       { class: "actions" },
       h("button", { class: "primary", type: "button", onclick: startFormulaCards }, "开始背诵卡"),
+      h("button", { class: "link", type: "button", onclick: startFormulaPractice }, "公式实操"),
       h("button", { class: "link", type: "button", onclick: startFormulaQuiz }, "公式测验"),
       h("button", { class: "link", type: "button", onclick: renderFormulaList }, "返回公式列表")
     )
@@ -1037,6 +1313,7 @@ async function startFormulaQuiz() {
   S = null;
   D = null;
   FC = null;
+  FP = null;
   const qs = picked.map((f) => {
     const others = shuffle(
       pool.filter(
@@ -1184,6 +1461,7 @@ function renderFormulaResult() {
       { class: "actions" },
       h("button", { class: "primary", type: "button", onclick: startFormulaQuiz }, "再测一次"),
       h("button", { class: "link", type: "button", onclick: startFormulaCards }, "继续背诵卡"),
+      h("button", { class: "link", type: "button", onclick: startFormulaPractice }, "公式实操"),
       h("button", { class: "link", type: "button", onclick: renderFormulaList }, "返回公式列表")
     )
   );
@@ -1209,6 +1487,7 @@ async function startFormulaCards() {
   S = null;
   D = null;
   F = null;
+  FP = null;
   FC = { cards, i: 0, known: 0, unknown: 0, revealed: false, busy: false };
   renderFormulaCard();
 }
@@ -1331,14 +1610,212 @@ function renderFormulaCardResult() {
   if (session.known === total) confetti();
 }
 
+async function startFormulaPractice() {
+  const token = newNav();
+  let all;
+  try {
+    all = await call("list_formula_exercises");
+  } catch {
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+  const pool = all.filter((e) =>
+    formulaScope === "all"
+      ? true
+      : formulaScope === "data"
+        ? e.group === "资料"
+        : e.group === "数量"
+  );
+  if (!pool.length) {
+    toast("当前范围暂无公式实操题");
+    return;
+  }
+  const qs = shuffle(pool).slice(0, Math.min(10, pool.length));
+
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = { qs, i: 0, right: 0, done: false, wrong: [], active: true };
+  renderFormulaPracticeQ();
+}
+
+function renderFormulaPracticeQ() {
+  const q = FP.qs[FP.i];
+  const last = FP.i + 1 >= FP.qs.length;
+  FP.done = false;
+  FP.ready = false;
+
+  const input = h("input", {
+    class: "ans",
+    type: "text",
+    inputmode: "decimal",
+    autocomplete: "off",
+    autocapitalize: "off",
+    spellcheck: "false",
+    enterkeyhint: "done",
+    placeholder: "输入答案",
+    "aria-label": "公式实操答案",
+  });
+  const fb = h("div", { class: "fb", "aria-live": "polite" });
+  const submit = h("button", { class: "primary", type: "button", onclick: submitFormulaPractice }, "确定");
+  const next = h(
+    "button",
+    { class: "primary hidden", type: "button", onclick: nextFormulaPractice },
+    last ? "查看结果" : "下一题"
+  );
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      FP = null;
+      renderFormulaList();
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (FP && FP.done && FP.ready) nextFormulaPractice();
+    else if (FP && !FP.done) submitFormulaPractice();
+  });
+  FP.ui = { input, fb, submit, next, q };
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h(
+        "button",
+        {
+          class: "link",
+          type: "button",
+          onclick: () => {
+            FP = null;
+            renderFormulaList();
+          },
+        },
+        "← 公式列表"
+      ),
+      h("span", {}, `${FP.i + 1} / ${FP.qs.length}`)
+    ),
+    h(
+      "div",
+      {
+        class: "progress",
+        role: "progressbar",
+        "aria-label": "公式实操进度",
+        "aria-valuemin": 0,
+        "aria-valuemax": FP.qs.length,
+        "aria-valuenow": FP.i + 1,
+      },
+      h("i", { style: `width:${((FP.i + 1) / FP.qs.length) * 100}%` })
+    ),
+    h("span", { class: "tag" }, `公式实操 · ${q.title}`),
+    h("div", { class: "big-q" }, q.text),
+    input,
+    fb,
+    submit,
+    next,
+    h("p", { class: "kbd-hint" }, "输入数字后按 Enter 提交，再按 Enter 下一题；Esc 退出")
+  );
+  requestAnimationFrame(() => input.focus());
+}
+
+async function submitFormulaPractice() {
+  if (!FP || !FP.active || FP.done) return;
+  const raw = normalizeAnswer(FP.ui.input.value);
+  if (raw === "" || !Number.isFinite(Number(raw))) {
+    toast("请输入数字");
+    FP.ui.input.focus();
+    return;
+  }
+  const session = FP;
+  const mine = Number(raw);
+  const q = FP.ui.q;
+  const correct = Math.abs(mine - q.answer) <= q.tol + 1e-9;
+  FP.done = true;
+  if (correct) {
+    FP.right++;
+    FP.ui.fb.textContent = "✓ 正确";
+    FP.ui.fb.className = "fb good";
+  } else {
+    FP.wrong.push({ q, mine: raw });
+    FP.ui.fb.textContent = `✗ 正确答案：${fmt(q.answer)}${q.unit}`;
+    FP.ui.fb.className = "fb bad";
+  }
+  FP.ui.input.readOnly = true;
+  FP.ui.submit.classList.add("hidden");
+
+  try {
+    await call("record_formula", { id: q.id, correct, today: today() });
+  } catch {
+    // 记录失败也继续显示解析
+  }
+  if (FP !== session || !FP.ui || FP.ui.q !== q) return;
+  FP.ready = true;
+  FP.ui.fb.textContent += `；${q.explanation}`;
+  FP.ui.next.classList.remove("hidden");
+  FP.ui.next.focus({ preventScroll: true });
+}
+
+function nextFormulaPractice() {
+  if (!FP || !FP.active || !FP.done || !FP.ready) return;
+  if (FP.i + 1 >= FP.qs.length) finishFormulaPractice();
+  else {
+    FP.i++;
+    renderFormulaPracticeQ();
+  }
+}
+
+function finishFormulaPractice() {
+  if (!FP) return;
+  const session = FP;
+  FP = null;
+  const total = session.qs.length;
+  const right = session.right;
+  screen(
+    h(
+      "div",
+      { class: "center" },
+      h("div", { class: "big" }, pct(right, total)),
+      h("p", { class: "sub" }, `公式实操 ${total} 题，答对 ${right} 题`),
+      h("p", { class: "sub" }, "每题都关联到对应公式，已更新艾宾浩斯复习计划。")
+    ),
+    session.wrong.length
+      ? h(
+          "div",
+          { class: "exp" },
+          h("b", {}, "错题回顾"),
+          session.wrong.map((w) =>
+            h(
+              "div",
+              { class: "wrow" },
+              `${w.q.title}：${w.q.text}  正确 ${fmt(w.q.answer)}${w.q.unit}，你答 ${w.mine}`
+            )
+          )
+        )
+      : null,
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "primary", type: "button", onclick: startFormulaPractice }, "再练一次"),
+      h("button", { class: "link", type: "button", onclick: renderFormulaList }, "返回公式背诵"),
+      h("button", { class: "link", type: "button", onclick: renderReviewPlan }, "查看复习计划")
+    )
+  );
+  if (right === total) confetti();
+}
+
 /* ---------------- 题库练习 ---------------- */
 
 let S = null;
 let F = null;
 let FC = null;
+let FP = null;
 let FORMULAS_CACHE = null;
 let memorizeFormulas = true;
 let formulaScope = "all";
+let historyFilter = "all";
+let trickMemorize = true;
 
 async function start(mode, opts = {}) {
   const token = newNav();
@@ -1362,6 +1839,7 @@ async function start(mode, opts = {}) {
   }
   F = null;
   FC = null;
+  FP = null;
   S = {
     mode,
     label: opts.label || mode,
@@ -1457,6 +1935,7 @@ async function choose(k) {
       choice: k,
       combo: S.combo,
       today: today(),
+      mode: S.label || S.mode,
     });
   } catch {
     if (S === session && S.ui) {
@@ -1616,6 +2095,7 @@ async function renderDrillMenu() {
   S = null;
   F = null;
   FC = null;
+  FP = null;
 
   let kinds, st;
   try {
@@ -1668,9 +2148,82 @@ async function renderDrillMenu() {
     groupSections,
     h(
       "div",
-      { class: "center" },
-      h("button", { class: "link", type: "button", onclick: renderFormulaList }, "📐 公式背诵与一览图")
+      { class: "grid2" },
+      h("button", { class: "chip", type: "button", onclick: renderTrickList }, "⚡ 速算技巧"),
+      h("button", { class: "chip", type: "button", onclick: renderFormulaList }, "📐 公式背诵")
     )
+  );
+}
+
+function renderTrickList() {
+  newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  const cats = [...new Set(TRICKS.map((t) => t.cat))];
+  const sections = cats.map((cat) => {
+    const items = TRICKS.filter((t) => t.cat === cat);
+    return section(
+      cat,
+      `${items.length} 条`,
+      h(
+        "div",
+        { class: "formula-list" },
+        items.map((t) =>
+          h(
+            "details",
+            { class: "formula", open: !trickMemorize },
+            h(
+              "summary",
+              {},
+              h("span", { class: "fname" }, t.name),
+              h("span", { class: "fgroup" }, t.cat)
+            ),
+            h(
+              "div",
+              { class: "fbody" },
+              h("div", { class: "fnote" }, t.tip),
+              h("div", { class: "fexample" }, "例：" + t.example)
+            )
+          )
+        )
+      )
+    );
+  });
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderDrillMenu }, "← 计算训练"),
+      h("span")
+    ),
+    h("h1", {}, "速算技巧"),
+    h("p", { class: "sub" }, "14 个常用速算套路：先理解，再在计算训练里用出来。"),
+    h(
+      "div",
+      { class: "formula-actions" },
+      h(
+        "button",
+        {
+          class: "chip" + (trickMemorize ? " on" : ""),
+          type: "button",
+          "aria-pressed": trickMemorize ? "true" : "false",
+          onclick: () => {
+            trickMemorize = !trickMemorize;
+            renderTrickList();
+          },
+        },
+        trickMemorize ? "背诵模式：隐藏技巧" : "背诵模式：显示技巧"
+      ),
+      h("button", { class: "primary", type: "button", onclick: renderDrillMenu }, "去计算训练")
+    ),
+    sections,
+    h("button", { class: "primary", type: "button", onclick: renderDrillMenu }, "去计算训练")
   );
 }
 
@@ -1952,6 +2505,10 @@ document.addEventListener("keydown", (e) => {
     if (D && D.active) {
       e.preventDefault();
       leaveDrill();
+    } else if (FP) {
+      e.preventDefault();
+      FP = null;
+      renderFormulaList();
     } else if (FC) {
       e.preventDefault();
       FC = null;

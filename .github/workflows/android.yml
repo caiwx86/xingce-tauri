@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-${{ github.ref }}
@@ -152,3 +152,26 @@ jobs:
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: 发布 GitHub Release
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)
+          test -n "$APK"
+          ASSET="xingce-${VERSION}.apk"
+          cp "$APK" "$ASSET"
+          TAG="v${VERSION}"
+          NOTES="行测刷题 ${TAG}
+
+          - 固定签名 release APK，可直接安装
+          - 构建运行：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - 首次从旧的 debug 签名包切换时需要先卸载旧包，之后可直接覆盖升级。"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" --title "行测刷题 ${TAG}" --notes "$NOTES" --latest
+          fi

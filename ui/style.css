@@ -433,6 +433,32 @@ h1 { margin: 8px 0 0; font-size: 27px; letter-spacing: -0.02em; }
 .plan-track i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), #7a5cf6); border-radius: inherit; transition: width .3s; }
 .plan-count { color: var(--sub); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 
+.fact-card { padding: 11px 14px; margin: 12px 0 0; background: linear-gradient(135deg, var(--card), var(--primary-weak)); border: 1px solid var(--line); border-radius: 14px; }
+.fact-title { font-size: 12px; font-weight: 700; color: var(--primary); letter-spacing: .02em; }
+.fact-card p { margin: 4px 0 0; color: var(--sub); font-size: 13px; line-height: 1.5; }
+.companion { margin-top: 8px; color: var(--sub); }
+.companion span:first-child { color: var(--gold); }
+.cat-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cat-chip {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 9px 12px;
+  color: inherit;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color .16s, transform .12s;
+}
+.cat-chip b { font-size: 14px; font-weight: 600; }
+.cat-chip span { color: var(--sub); font-size: 11px; }
+@media (hover: hover) { .cat-chip:hover { border-color: var(--primary); transform: translateY(-1px); } }
+.animal .ararity { margin-top: 2px; color: var(--gold); font-size: 11px; letter-spacing: .03em; }
+.animal.locked .ararity { color: var(--sub); }
+
 @media (min-width: 700px) {
   .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

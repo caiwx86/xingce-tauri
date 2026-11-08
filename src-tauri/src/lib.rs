@@ -1764,7 +1764,8 @@ mod tests {
 
     #[test]
     fn formulas_are_sane() {
-        assert_eq!(FORMULAS.len(), 43);
+        let total = FORMULAS.len();
+        assert_eq!(total, 43);
         let mut ids = BTreeSet::new();
         for &(id, group, name, formula, note, example) in FORMULAS.iter() {
             assert!(ids.insert(id), "公式 id 重复：{id}");

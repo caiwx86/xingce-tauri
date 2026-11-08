@@ -1,0 +1,48 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: 安装 NDK
+        run: |
+          sdkmanager "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: 生成图标并初始化 Android 工程
+        run: |
+          cargo tauri icon app-icon.png
+          cargo tauri android init --ci
+
+      - name: 构建 APK (debug 签名,可直接安装)
+        run: cargo tauri android build --apk --debug --target aarch64 --ci
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xingce-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk

@@ -11,17 +11,21 @@ use tauri::{Manager, State};
 
 const CATS: [&str; 5] = ["言语理解", "数量关系", "判断推理", "资料分析", "常识判断"];
 const DAILY_COUNT: usize = 5;
+const SMART_REVIEW_LIMIT: usize = 20;
+/// 艾宾浩斯复习间隔（天）：新学 -> 1 -> 2 -> 4 -> 7 -> 15 -> 30 -> 60
+const REVIEW_INTERVALS: [i64; 8] = [0, 1, 2, 4, 7, 15, 30, 60];
 const PROGRESS_FILE: &str = "progress.json";
 const BACKUP_FILE: &str = "progress.backup.json";
 
 /// (名称， 说明， 速算小贴士)。第一项"综合"表示随机混合其余各类。
-const DRILLS: [(&str, &str, &str); 16] = [
+const DRILLS: [(&str, &str, &str); 21] = [
     ("综合", "各类速算随机混合", "先看数字特征再动笔：能凑整就凑整，能拆分就拆分，心算不出再列竖式。"),
     ("加减", "三、四位数加减法", "凑整法：397+256 = 400+256−3；减法可以先多减再补回，如 842−298 = 842−300+2。"),
     ("乘法", "两位数乘法与特殊乘数", "×11：首尾拆开中间相加（35×11=385）；×25：÷4再×100；×15：×10再加一半；两位数×两位数可拆成（a×10）+（a×个位）。"),
     ("平方", "11–35 的平方", "个位是5：十位×（十位+1）后接25，如 35²→3×4=12→1225。其余用（a±b）² 展开，如 23²=20²+2×20×3+3²=529。"),
     ("除法", "整除除法", "÷5 = ×2÷10；÷25 = ×4÷100；÷4 可连除两次2；÷9、÷11 可先估商再验算。"),
     ("分数", "分数化百分数（保留1位小数）", "牢记：1/3≈33.3%、1/6≈16.7%、1/7≈14.3%、1/8=12.5%、1/9≈11.1%、1/11≈9.1%、1/12≈8.3%、1/16=6.25%。其余分数由它们倍数推出。"),
+    ("资料分析", "资料分析基础运算混合", "先判断求的是增长率、增长量、基期量还是比重，再选公式；能估算就先估算。"),
     ("百分比", "求一个数的百分之几", "把百分数拆成 10%、5% 等好算的份再相加；如 240×15% = 240×10% + 240×5%。"),
     ("增长", "增长/下降百分比计算", "增长15% = 原数 + 10% + 5%；下降20% 即乘0.8（原数×4÷5）；增长25% 即乘1.25（原数×5÷4）。"),
     ("增长量", "由基期量和增长率求增长量", "增长量 = 基期量 × 增长率；也可以先求现期量再相减。"),
@@ -30,15 +34,19 @@ const DRILLS: [(&str, &str, &str); 16] = [
     ("平均数", "总量除以份数", "平均数 = 总量 ÷ 份数；先看总量和份数的量级，答案应在两者之间。"),
     ("倍数", "求两个量的倍数关系", "倍数 = A ÷ B；注意“是几倍”和“多几倍”差1。"),
     ("百分点", "两个百分数直接相减", "百分点 = 现期比重 − 基期比重；百分数相减得到的是百分点，不是增长率。"),
+    ("隔年增长", "连续两年增长率求隔年增长率", "隔年增长率 = r1 + r2 + r1×r2；先算前两项，再加乘积。"),
+    ("年均增长量", "由初期量、末期量和年数求年均增长量", "年均增长量 =（末期量 − 初期量）÷ 年数；年数是末年减初年。"),
+    ("年均增长率", "由初期量、末期量和年数求年均增长率", "年均增长率 =（末期量 ÷ 初期量）^(1/年数) − 1；可用常见增长率代入验证。"),
+    ("贡献率", "部分增长量占整体增长量的比例", "增长贡献率 = 部分增长量 ÷ 整体增长量 × 100%；分母是整体增长量。"),
     ("估算", "四舍五入到整百估算乘积", "把两个数分别看成接近的整十/整百数再相乘，最后按题目要求取整。"),
     ("混合", "四则混合运算", "先乘除后加减，有括号先算括号；先估个位数验证结果是否合理。"),
 ];
 
 /// (id, 分组, 名称, 公式, 说明, 例子)
-const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
+const FORMULAS: [(&str, &str, &str, &str, &str, &str); 43] = [
     (
         "growth-rate",
-        "增长",
+        "资料·增长",
         "增长率",
         "增长率 = （现期量 − 基期量） ÷ 基期量 = 增长量 ÷ 基期量",
         "增长率表示现期量比基期量增长了百分之几。",
@@ -46,7 +54,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "growth-amount",
-        "增长",
+        "资料·增长",
         "增长量",
         "增长量 = 现期量 − 基期量 = 基期量 × 增长率",
         "增长量是绝对量，增长率是相对量，两者不能混用。",
@@ -54,7 +62,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "base-value",
-        "增长",
+        "资料·增长",
         "基期量",
         "基期量 = 现期量 ÷（1 + 增长率）",
         "已知现期量和增长率，求基期量用除法。",
@@ -62,7 +70,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "current-value",
-        "增长",
+        "资料·增长",
         "现期量",
         "现期量 = 基期量 ×（1 + 增长率）",
         "已知基期量和增长率，求现期量用乘法。",
@@ -70,7 +78,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "inter-year",
-        "增长",
+        "资料·增长",
         "隔年增长率",
         "隔年增长率 = r1 + r2 + r1 × r2",
         "r1、r2 为相邻两年的增长率；隔年增长量 = 基期量 × 隔年增长率。",
@@ -78,7 +86,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "annual-amount",
-        "增长",
+        "资料·增长",
         "年均增长量",
         "年均增长量 =（末期量 − 初期量） ÷ 年数",
         "年数 = 末年 − 初年，不是末年 − 初年 + 1。",
@@ -86,7 +94,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "annual-rate",
-        "增长",
+        "资料·增长",
         "年均增长率",
         "年均增长率 =（末期量 ÷ 初期量）^（1/年数） − 1",
         "开方不好算时，可用选项代入或估算。",
@@ -94,7 +102,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "ratio",
-        "比重",
+        "资料·比重",
         "比重",
         "比重 = 部分量 ÷ 整体量 × 100%",
         "比重是部分占整体的百分比，整体量在分母。",
@@ -102,7 +110,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "part-value",
-        "比重",
+        "资料·比重",
         "部分量",
         "部分量 = 整体量 × 比重",
         "已知整体量和比重，求部分量用乘法。",
@@ -110,7 +118,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "whole-value",
-        "比重",
+        "资料·比重",
         "整体量",
         "整体量 = 部分量 ÷ 比重",
         "已知部分量和比重，求整体量用除法。",
@@ -118,7 +126,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "percentage-point",
-        "比重",
+        "资料·比重",
         "百分点",
         "百分点 = 现期比重 − 基期比重",
         "两个百分数相减，单位是百分点，不是百分数。",
@@ -126,7 +134,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "average",
-        "平均与倍数",
+        "资料·平均",
         "平均数",
         "平均数 = 总量 ÷ 份数",
         "平均数反映整体水平，注意总量和份数要对应。",
@@ -134,7 +142,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "multiple",
-        "平均与倍数",
+        "资料·平均",
         "倍数",
         "倍数 = A ÷ B",
         "“A 是 B 的几倍”用除法；“A 比 B 多几倍”再减1。",
@@ -142,7 +150,7 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "mixed-growth",
-        "综合",
+        "资料·综合",
         "混合增长率",
         "整体增长率介于两部分增长率之间，偏向基期量大的部分",
         "用于两部分合成整体的增长率判断，先定性再计算。",
@@ -150,11 +158,235 @@ const FORMULAS: [(&str, &str, &str, &str, &str, &str); 15] = [
     ),
     (
         "contribution",
-        "综合",
+        "资料·综合",
         "增长贡献率",
         "增长贡献率 = 部分增长量 ÷ 整体增长量 × 100%",
         "贡献率的分母是整体增长量，不是整体量。",
         "整体增长100，某部分增长30，贡献率 = 30÷100 = 30%。",
+    ),
+    (
+        "work-total",
+        "数量·工程",
+        "工程总量",
+        "工作总量 = 工作效率 × 工作时间",
+        "工程问题先设总量为效率的最小公倍数，通常更好算。",
+        "效率20，时间6，工作总量 = 20×6 = 120。",
+    ),
+    (
+        "work-efficiency",
+        "数量·工程",
+        "合作效率",
+        "合作效率 = 各人效率之和",
+        "合作时效率相加，时间取倒数后再相加也可以。",
+        "甲效率10，乙效率15，合作效率 = 10+15 = 25。",
+    ),
+    (
+        "work-time",
+        "数量·工程",
+        "合作时间",
+        "合作时间 = 工作总量 ÷ 合作效率",
+        "先求效率和，再用总量除以效率和。",
+        "总量120，合作效率30，合作时间 = 120÷30 = 4。",
+    ),
+    (
+        "distance",
+        "数量·行程",
+        "路程",
+        "路程 = 速度 × 时间",
+        "行程问题先统一单位，再代入公式。",
+        "速度60，时间2，路程 = 60×2 = 120。",
+    ),
+    (
+        "meeting",
+        "数量·行程",
+        "相遇时间",
+        "相遇时间 = 路程和 ÷ 速度和",
+        "相向而行用速度和；同向追及用速度差。",
+        "路程和120，速度和60，相遇时间 = 120÷60 = 2。",
+    ),
+    (
+        "catch-up",
+        "数量·行程",
+        "追及时间",
+        "追及时间 = 路程差 ÷ 速度差",
+        "追及问题找初始距离差和速度差。",
+        "路程差100，速度差10，追及时间 = 100÷10 = 10。",
+    ),
+    (
+        "boat",
+        "数量·行程",
+        "流水行船",
+        "顺水速度 = 船速 + 水速；逆水速度 = 船速 − 水速",
+        "船速 =（顺水速度 + 逆水速度）÷2；水速 =（顺水 − 逆水）÷2。",
+        "船速20，水速5，顺水25，逆水15。",
+    ),
+    (
+        "profit",
+        "数量·经济",
+        "利润",
+        "利润 = 售价 − 成本",
+        "利润是绝对量，利润率是相对量。",
+        "售价120，成本100，利润 = 120−100 = 20。",
+    ),
+    (
+        "profit-rate",
+        "数量·经济",
+        "利润率",
+        "利润率 = 利润 ÷ 成本 × 100%",
+        "利润率的分母是成本，不是售价。",
+        "利润20，成本100，利润率 = 20÷100 = 20%。",
+    ),
+    (
+        "price",
+        "数量·经济",
+        "售价",
+        "售价 = 成本 ×（1 + 利润率）",
+        "已知成本和利润率求售价，用乘法。",
+        "成本100，利润率20%，售价 = 100×1.2 = 120。",
+    ),
+    (
+        "discount",
+        "数量·经济",
+        "折扣",
+        "折扣 = 售价 ÷ 标价",
+        "八折表示售价是标价的80%。",
+        "售价120，标价150，折扣 = 120÷150 = 80%，即八折。",
+    ),
+    (
+        "concentration",
+        "数量·溶液",
+        "浓度",
+        "浓度 = 溶质 ÷ 溶液 × 100%",
+        "溶液 = 溶质 + 溶剂；稀释前后溶质质量不变。",
+        "溶质20，溶液100，浓度 = 20÷100 = 20%。",
+    ),
+    (
+        "solute",
+        "数量·溶液",
+        "溶质",
+        "溶质 = 溶液 × 浓度",
+        "已知溶液和浓度求溶质，用乘法。",
+        "溶液200，浓度15%，溶质 = 200×15% = 30。",
+    ),
+    (
+        "permutation",
+        "数量·计数",
+        "排列数",
+        "A(n,m) = n! ÷（n−m）!",
+        "排列与顺序有关；从n个不同元素中取m个排列。",
+        "A(5,3) = 5×4×3 = 60。",
+    ),
+    (
+        "combination",
+        "数量·计数",
+        "组合数",
+        "C(n,m) = n! ÷ [m!（n−m）!]",
+        "组合与顺序无关；C(n,m)=C(n,n−m)。",
+        "C(5,3) = 5×4×3 ÷（3×2×1） = 10。",
+    ),
+    (
+        "probability",
+        "数量·计数",
+        "概率",
+        "概率 = 有利结果数 ÷ 总结果数",
+        "概率一定在0到1之间，最后可化成百分数。",
+        "有利结果3，总结果10，概率 = 3÷10 = 30%。",
+    ),
+    (
+        "inclusion-exclusion",
+        "数量·计数",
+        "两集合容斥",
+        "|A∪B| = |A| + |B| − |A∩B|",
+        "至少满足一个条件的数量 = 两类数量之和 − 同时满足的数量。",
+        "|A|=30，|B|=25，|A∩B|=10，|A∪B| = 30+25−10 = 45。",
+    ),
+    (
+        "arithmetic-term",
+        "数量·数列",
+        "等差数列通项",
+        "aₙ = a₁ +（n−1）d",
+        "d为公差；第n项比首项多(n−1)个公差。",
+        "a₁=3，d=4，n=10，a₁₀ = 3+9×4 = 39。",
+    ),
+    (
+        "arithmetic-sum",
+        "数量·数列",
+        "等差数列求和",
+        "Sₙ = n（a₁ + aₙ） ÷ 2",
+        "等差数列求和等于“首项加末项乘项数除以2”。",
+        "a₁=3，a₁₀=39，n=10，S₁₀ = 10×（3+39）÷2 = 210。",
+    ),
+    (
+        "geometric-term",
+        "数量·数列",
+        "等比数列通项",
+        "aₙ = a₁ × q^（n−1）",
+        "q为公比；第n项比首项多乘(n−1)次公比。",
+        "a₁=2，q=3，n=4，a₄ = 2×3³ = 54。",
+    ),
+    (
+        "geometric-sum",
+        "数量·数列",
+        "等比数列求和",
+        "Sₙ = a₁（1 − qⁿ） ÷（1 − q），q ≠ 1",
+        "q=1时，Sₙ=n×a₁。",
+        "a₁=2，q=3，n=4，S₄ = 2×（1−81）÷（1−3） = 80。",
+    ),
+    (
+        "rectangle",
+        "数量·几何",
+        "长方形面积",
+        "长方形面积 = 长 × 宽",
+        "周长 = 2×（长+宽）。",
+        "长5，宽4，面积 = 5×4 = 20。",
+    ),
+    (
+        "triangle",
+        "数量·几何",
+        "三角形面积",
+        "三角形面积 = 底 × 高 ÷ 2",
+        "同底等高的三角形面积相等。",
+        "底6，高4，面积 = 6×4÷2 = 12。",
+    ),
+    (
+        "circle",
+        "数量·几何",
+        "圆面积",
+        "圆面积 = π × 半径²",
+        "周长 = 2πr；直径d=2r。",
+        "半径3，面积 = π×3² = 9π。",
+    ),
+    (
+        "cylinder",
+        "数量·几何",
+        "圆柱体积",
+        "圆柱体积 = π × 半径² × 高",
+        "底面积乘高；圆锥体积是等底等高圆柱的1/3。",
+        "半径2，高5，体积 = π×2²×5 = 20π。",
+    ),
+    (
+        "chicken-rabbit",
+        "数量·杂题",
+        "鸡兔同笼",
+        "兔数 =（总脚数 − 2 × 总头数） ÷ 2",
+        "假设全是鸡，多出来的脚每2只对应1只兔。",
+        "35个头、94只脚，兔 =（94−70）÷2 = 12只。",
+    ),
+    (
+        "age-difference",
+        "数量·杂题",
+        "年龄问题",
+        "两人的年龄差始终不变",
+        "年龄同时增长，倍数关系会变化，但差不变。",
+        "父亲40岁、儿子10岁，差30岁；5年后差仍是30岁。",
+    ),
+    (
+        "cow-grass",
+        "数量·杂题",
+        "牛吃草",
+        "原有草量 =（牛数 − 每天生长量）× 天数",
+        "草在吃的同时生长，先求每天新长草量。",
+        "牛20头，每天长5份，吃10天，原有草量 =（20−5）×10 = 150份。",
     ),
 ];
 
@@ -284,6 +516,34 @@ fn require_day(today: &str) -> Result<(), String> {
     }
 }
 
+/// 按艾宾浩斯间隔推进记忆阶段；答错回到第 0 阶，明天再复习。
+fn update_review(st: &mut ReviewState, correct: bool, today: i64) {
+    let same_day = st.reps > 0 && st.last == today;
+    st.reps = st.reps.saturating_add(1);
+    st.last = today;
+    if same_day {
+        // 同一天重复作答只记录遗忘，不重复推进记忆阶段
+        if !correct {
+            st.stage = 0;
+            st.lapses = st.lapses.saturating_add(1);
+            st.due = today + 1;
+        }
+        return;
+    }
+    if correct {
+        st.stage = st.stage.saturating_add(1).min(7);
+        st.due = today + REVIEW_INTERVALS[st.stage as usize];
+    } else {
+        st.stage = 0;
+        st.lapses = st.lapses.saturating_add(1);
+        st.due = today + 1;
+    }
+}
+
+fn count_due<T: Ord>(map: &BTreeMap<T, ReviewState>, today: i64) -> usize {
+    map.values().filter(|s| s.due <= today).count()
+}
+
 /* ---------------- 数据结构 ---------------- */
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -311,6 +571,21 @@ struct DrillStat {
     best_avg_secs: Option<f64>,
 }
 
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+struct ReviewState {
+    /// 记忆阶段 0..=7，对应 REVIEW_INTERVALS
+    stage: u8,
+    /// 下次复习日期（1970-01-01 起的天数）
+    due: i64,
+    /// 最近一次作答日期
+    last: i64,
+    /// 遗忘次数
+    lapses: u32,
+    /// 作答次数
+    reps: u32,
+}
+
 #[derive(Default, Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct Progress {
@@ -328,6 +603,9 @@ struct Progress {
     goal_hit: String,   // 最近一次达成每日目标的日期
     daily_done: String, // 最近一次完成每日挑战的日期
     achv: BTreeSet<String>,
+    // 艾宾浩斯复习
+    review: BTreeMap<u32, ReviewState>,
+    formula_review: BTreeMap<String, ReviewState>,
 }
 
 struct AppState {
@@ -668,10 +946,51 @@ fn daily_questions(qs: &[Question], today: &str) -> Vec<Question> {
     idx.into_iter().map(|i| qs[i].clone()).collect()
 }
 
-/// mode: "全部" | "错题本" | "每日挑战" | 某个题型名称
+/// 智能复习：先复习今天到期的题，再用新题补足一组。
+fn smart_review_questions(state: &AppState, today: &str) -> Vec<Question> {
+    let Some(today_num) = day_num(today) else {
+        return Vec::new();
+    };
+    let p = state.progress();
+    let mut due: Vec<&Question> = state
+        .questions
+        .iter()
+        .filter(|q| p.review.get(&q.id).is_some_and(|s| s.due <= today_num))
+        .collect();
+    due.sort_by_key(|q| {
+        p.review
+            .get(&q.id)
+            .map(|s| (s.due, s.stage))
+            .unwrap_or((i64::MAX, 0))
+    });
+    let mut out: Vec<Question> = due.into_iter().take(SMART_REVIEW_LIMIT).cloned().collect();
+
+    if out.len() < SMART_REVIEW_LIMIT {
+        let mut r = Rng::seeded(today_num as u64);
+        let mut unseen: Vec<&Question> = state
+            .questions
+            .iter()
+            .filter(|q| !p.review.contains_key(&q.id))
+            .collect();
+        for i in (1..unseen.len()).rev() {
+            let j = (r.next() % (i as u64 + 1)) as usize;
+            unseen.swap(i, j);
+        }
+        out.extend(
+            unseen
+                .into_iter()
+                .take(SMART_REVIEW_LIMIT - out.len())
+                .cloned(),
+        );
+    }
+    out
+}
+
+/// mode: "全部" | "错题本" | "每日挑战" | "智能复习" | 某个题型名称
 #[tauri::command]
 fn get_questions(state: State<AppState>, mode: String, today: Option<String>) -> Vec<Question> {
     match mode.as_str() {
+        "智能复习" => smart_review_questions(&state, today.as_deref().unwrap_or("")),
         "每日挑战" => daily_questions(&state.questions, today.as_deref().unwrap_or("")),
         "全部" => state.questions.clone(),
         "错题本" => {
@@ -722,6 +1041,10 @@ fn submit_answer(
     } else {
         p.wrong.insert(id);
     }
+
+    let today_num = day_num(&today).unwrap_or(0);
+    let review = p.review.entry(id).or_default();
+    update_review(review, correct, today_num);
 
     let new_combo = if correct { combo.saturating_add(1) } else { 0 };
     let base = if correct {
@@ -810,6 +1133,11 @@ struct Profile {
     today_count: u32,
     goal: u32,
     daily_done: bool,
+    review_due: usize,
+    review_total: usize,
+    new_questions: usize,
+    formula_due: usize,
+    formula_total: usize,
     achievements: Vec<AchvView>,
 }
 
@@ -817,6 +1145,15 @@ struct Profile {
 fn get_profile(state: State<AppState>, today: String) -> Profile {
     let p = state.progress();
     let level = level_of(p.xp);
+    let today_num = day_num(&today);
+    let review_due = today_num.map_or(0, |t| count_due(&p.review, t));
+    let formula_due = today_num.map_or(0, |t| count_due(&p.formula_review, t));
+    let review_total = p.review.len();
+    let new_questions = state
+        .questions
+        .iter()
+        .filter(|q| !p.review.contains_key(&q.id))
+        .count();
     Profile {
         xp: p.xp,
         level,
@@ -830,6 +1167,11 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
         today_count: if p.today == today { p.today_count } else { 0 },
         goal: DAILY_GOAL,
         daily_done: p.daily_done == today,
+        review_due,
+        review_total,
+        new_questions,
+        formula_due,
+        formula_total: p.formula_review.len(),
         achievements: ACHV
             .iter()
             .map(|&(id, icon, name, desc)| AchvView {
@@ -840,6 +1182,104 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
                 unlocked: p.achv.contains(id),
             })
             .collect(),
+    }
+}
+
+#[derive(Serialize)]
+struct ReviewStage {
+    stage: u8,
+    label: &'static str,
+    count: usize,
+}
+
+#[derive(Serialize)]
+struct ReviewDay {
+    offset: i64,
+    label: &'static str,
+    count: usize,
+}
+
+#[derive(Serialize)]
+struct ReviewPlan {
+    due_today: usize,
+    new_questions: usize,
+    review_total: usize,
+    formula_due: usize,
+    formula_total: usize,
+    stages: Vec<ReviewStage>,
+    forecast: Vec<ReviewDay>,
+    formula_forecast: Vec<ReviewDay>,
+}
+
+#[tauri::command]
+fn get_review_plan(state: State<AppState>, today: String) -> ReviewPlan {
+    let today_num = day_num(&today);
+    let p = state.progress();
+    let due_today = today_num.map_or(0, |t| count_due(&p.review, t));
+    let formula_due = today_num.map_or(0, |t| count_due(&p.formula_review, t));
+    let new_questions = state
+        .questions
+        .iter()
+        .filter(|q| !p.review.contains_key(&q.id))
+        .count();
+    let stages = (0..=7u8)
+        .map(|stage| {
+            let label = match stage {
+                0 => "待巩固",
+                1 => "1 天",
+                2 => "2 天",
+                3 => "4 天",
+                4 => "7 天",
+                5 => "15 天",
+                6 => "30 天",
+                _ => "60 天",
+            };
+            ReviewStage {
+                stage,
+                label,
+                count: p.review.values().filter(|s| s.stage == stage).count(),
+            }
+        })
+        .collect();
+    let labels = [
+        "今天", "明天", "后天", "3 天后", "4 天后", "5 天后", "6 天后",
+    ];
+    let forecast = (0..7i64)
+        .map(|offset| {
+            let count = today_num.map_or(0, |t| {
+                p.review.values().filter(|s| s.due == t + offset).count()
+            });
+            ReviewDay {
+                offset,
+                label: labels[offset as usize],
+                count,
+            }
+        })
+        .collect();
+    let formula_forecast = (0..7i64)
+        .map(|offset| {
+            let count = today_num.map_or(0, |t| {
+                p.formula_review
+                    .values()
+                    .filter(|s| s.due == t + offset)
+                    .count()
+            });
+            ReviewDay {
+                offset,
+                label: labels[offset as usize],
+                count,
+            }
+        })
+        .collect();
+    ReviewPlan {
+        due_today,
+        new_questions,
+        review_total: p.review.len(),
+        formula_due,
+        formula_total: p.formula_review.len(),
+        stages,
+        forecast,
+        formula_forecast,
     }
 }
 
@@ -964,14 +1404,14 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
         "百分比" => {
             let a = 20 * r.range(5, 60);
             let p = r.pick(&[5i64, 10, 15, 20, 25, 30, 40, 50, 60, 75]);
-            ex(format!("{a} 的 {p}% 是多少?"), a * p / 100)
+            ex(format!("{a} 的 {p}% 是多少？"), a * p / 100)
         }
         "增长量" => {
             let base = 20 * r.range(10, 60);
             let p = r.pick(&[5i64, 10, 15, 20, 25, 30, 40, 50]);
             let current = base * (100 + p) / 100;
             ex(
-                format!("基期量为 {base}，同比增长 {p}%，增长量是多少?"),
+                format!("基期量为 {base}，同比增长 {p}%，增长量是多少？"),
                 current - base,
             )
         }
@@ -980,7 +1420,7 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
             let p = r.pick(&[5i64, 10, 15, 20, 25, 30, 40, 50]);
             let current = base * (100 + p) / 100;
             ex(
-                format!("现期量为 {current}，同比增长 {p}%，基期量是多少?"),
+                format!("现期量为 {current}，同比增长 {p}%，基期量是多少？"),
                 base,
             )
         }
@@ -998,20 +1438,20 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
             let n = r.range(4, 12);
             let avg = r.range(20, 120);
             let total = n * avg;
-            ex(format!("{n} 个数的总和是 {total}，平均数是多少?"), avg)
+            ex(format!("{n} 个数的总和是 {total}，平均数是多少？"), avg)
         }
         "倍数" => {
             let b = r.range(5, 50);
             let k = r.range(2, 9);
             let a = b * k;
-            ex(format!("{a} 是 {b} 的多少倍?"), k)
+            ex(format!("{a} 是 {b} 的多少倍？"), k)
         }
         "百分点" => {
             let a = 5 * r.range(2, 16);
             let delta = 5 * r.range(1, 3);
             let b = a + delta;
             ex(
-                format!("某比重从 {a}% 提高到 {b}%，提高了多少个百分点?"),
+                format!("某比重从 {a}% 提高到 {b}%，提高了多少个百分点？"),
                 delta,
             )
         }
@@ -1020,6 +1460,70 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
             let b = r.range(11, 99);
             let rounded = ((a * b + 50) / 100) * 100;
             ex(format!("{a} × {b} ≈ ?（四舍五入到整百）"), rounded)
+        }
+        "资料分析" => {
+            let kinds = [
+                "百分比",
+                "增长",
+                "增长量",
+                "基期量",
+                "比重",
+                "平均数",
+                "倍数",
+                "百分点",
+                "隔年增长",
+                "年均增长量",
+                "年均增长率",
+                "贡献率",
+                "估算",
+            ];
+            let k = r.pick(&kinds);
+            make(k, r)
+        }
+        "隔年增长" => {
+            let r1 = r.pick(&[10i64, 20, 30, 40]);
+            let r2 = r.pick(&[10i64, 20, 30, 40]);
+            let answer = r1 + r2 + r1 * r2 / 100;
+            DrillQ {
+                text: format!("连续两年分别增长 {r1}% 和 {r2}%，隔年增长率是多少？（%）"),
+                answer: answer as f64,
+                tol: 0.06,
+            }
+        }
+        "年均增长量" => {
+            let initial = 20 * r.range(5, 50);
+            let years = r.range(2, 5);
+            let growth = 10 * r.range(1, 20);
+            let last = initial + growth * years;
+            ex(
+                format!("初期量为 {initial}，{years} 年后为 {last}，年均增长量是多少？"),
+                growth,
+            )
+        }
+        "年均增长率" => {
+            let rate = r.pick(&[10i64, 20]);
+            let years = r.pick(&[2i64, 3]);
+            let mut last = 1000i64;
+            for _ in 0..years {
+                last = last * (100 + rate) / 100;
+            }
+            DrillQ {
+                text: format!("初期量为 1000，{years} 年后为 {last}，年均增长率是多少？（%）"),
+                answer: rate as f64,
+                tol: 0.06,
+            }
+        }
+        "贡献率" => {
+            let total = 20 * r.range(5, 25);
+            let p = 5 * r.range(1, 10);
+            let part = total * p / 100;
+            DrillQ {
+                text: format!(
+                    "整体增长量为 {total}，某部分增长量为 {part}，增长贡献率是多少？（%）"
+                ),
+                answer: p as f64,
+                tol: 0.06,
+            }
         }
         "混合" => {
             if r.range(0, 1) == 0 {
@@ -1063,21 +1567,51 @@ struct FormulaInfo {
     formula: &'static str,
     note: &'static str,
     example: &'static str,
+    stage: u8,
+    reps: u32,
+    due: bool,
 }
 
 #[tauri::command]
-fn list_formulas() -> Vec<FormulaInfo> {
+fn list_formulas(state: State<AppState>, today: String) -> Vec<FormulaInfo> {
+    let today_num = day_num(&today);
+    let p = state.progress();
     FORMULAS
         .iter()
-        .map(|&(id, group, name, formula, note, example)| FormulaInfo {
-            id,
-            group,
-            name,
-            formula,
-            note,
-            example,
+        .map(|&(id, group, name, formula, note, example)| {
+            let st = p.formula_review.get(id);
+            FormulaInfo {
+                id,
+                group,
+                name,
+                formula,
+                note,
+                example,
+                stage: st.map_or(0, |s| s.stage),
+                reps: st.map_or(0, |s| s.reps),
+                due: st.is_some_and(|s| today_num.is_some_and(|t| s.due <= t)),
+            }
         })
         .collect()
+}
+
+#[tauri::command]
+fn record_formula(
+    state: State<AppState>,
+    id: String,
+    correct: bool,
+    today: String,
+) -> Result<(), String> {
+    require_day(&today)?;
+    if !FORMULAS.iter().any(|f| f.0 == id.as_str()) {
+        return Err(format!("公式 {id} 不存在"));
+    }
+    let today_num = day_num(&today).unwrap_or(0);
+    let mut p = state.progress();
+    let st = p.formula_review.entry(id).or_default();
+    update_review(st, correct, today_num);
+    state.save(&p);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1184,8 +1718,10 @@ pub fn run() {
             claim_daily,
             get_stats,
             get_profile,
+            get_review_plan,
             reset_progress,
             list_formulas,
+            record_formula,
             list_drills,
             gen_drill,
             record_drill
@@ -1228,7 +1764,7 @@ mod tests {
 
     #[test]
     fn formulas_are_sane() {
-        assert_eq!(list_formulas().len(), FORMULAS.len());
+        assert_eq!(FORMULAS.len(), 43);
         let mut ids = BTreeSet::new();
         for &(id, group, name, formula, note, example) in FORMULAS.iter() {
             assert!(ids.insert(id), "公式 id 重复：{id}");
@@ -1238,6 +1774,32 @@ mod tests {
             assert!(!note.trim().is_empty(), "{id} 说明为空");
             assert!(!example.trim().is_empty(), "{id} 例子为空");
         }
+    }
+
+    #[test]
+    fn review_schedule_follows_ebbinghaus() {
+        let mut st = ReviewState::default();
+        update_review(&mut st, true, 100);
+        assert_eq!(st.stage, 1);
+        assert_eq!(st.due, 101);
+        update_review(&mut st, true, 100); // 同一天重复作答不重复升阶
+        assert_eq!(st.stage, 1);
+        assert_eq!(st.due, 101);
+
+        update_review(&mut st, true, 101);
+        assert_eq!(st.stage, 2);
+        assert_eq!(st.due, 103);
+
+        update_review(&mut st, false, 103);
+        assert_eq!(st.stage, 0);
+        assert_eq!(st.due, 104);
+        assert_eq!(st.lapses, 1);
+
+        for day in 0..20 {
+            update_review(&mut st, true, 200 + day);
+        }
+        assert_eq!(st.stage, 7);
+        assert!(count_due(&BTreeMap::from([(1u32, st)]), 400) >= 1);
     }
 
     #[test]

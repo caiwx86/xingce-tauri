@@ -209,7 +209,7 @@ h1 { margin: 8px 0 0; font-size: 27px; letter-spacing: -0.02em; }
 .review .ricon { flex: 0 0 auto; font-weight: 700; }
 .review.ok .ricon { color: var(--ok-b); }
 .review.bad .ricon { color: var(--bad-b); }
-.review .rstem { font-size: 14px; line-height: 1.5; }
+.review .rstem { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
 .review .rbody { padding: 0 14px 14px; font-size: 14px; }
 .rrow { display: flex; gap: 10px; padding: 3px 0; }
 .rrow b { flex: 0 0 64px; color: var(--sub); font-weight: 500; }
@@ -343,6 +343,7 @@ h1 { margin: 8px 0 0; font-size: 27px; letter-spacing: -0.02em; }
 .grid2 .card { height: 100%; padding: 13px 14px; }
 .grid2 .card .t { font-size: 16px; }
 .grid2 .wide { grid-column: 1 / -1; }
+.section > .list + .grid2 { margin-top: 10px; }
 @media (max-width: 350px) {
   .grid2 { grid-template-columns: 1fr; }
   .grid2 .wide { grid-column: auto; }
@@ -393,6 +394,44 @@ h1 { margin: 8px 0 0; font-size: 27px; letter-spacing: -0.02em; }
 .switch:checked + .switch-track .switch-thumb { transform: translateX(20px); }
 .switch:focus-visible + .switch-track { outline: 2px solid var(--primary); outline-offset: 2px; }
 .switch:disabled + .switch-track { opacity: .45; }
+
+.stem { white-space: pre-wrap; }
+.scope-chips { flex-wrap: wrap; margin: 0 0 14px; }
+.scope-chips .chip { flex: 1 1 90px; text-align: center; }
+.formula-actions .grid2 { gap: 8px; }
+.formula-actions .grid2 .chip { width: 100%; }
+.formula .fgroup.new { color: var(--primary); background: var(--primary-weak); }
+.formula .fgroup.due { color: var(--gold); background: var(--gold-weak); }
+.formula .fgroup.stage { color: var(--ok-b); background: var(--ok); }
+.poster-groups { display: grid; gap: 10px; }
+.poster-group { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.poster-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px dashed var(--line); }
+.poster-head b { font-size: 15px; }
+.poster-head span { color: var(--sub); font-size: 11px; }
+.poster-list { display: grid; gap: 8px; }
+.poster-item { display: grid; gap: 2px; }
+.poster-item b { font-size: 13px; }
+.poster-item span { color: var(--sub); font-size: 12px; line-height: 1.5; }
+@media (min-width: 560px) {
+  .poster-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+
+.flash-card { padding: 20px 16px; margin-bottom: 4px; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+.flash-name { font-size: 26px; font-weight: 700; line-height: 1.3; }
+.flash-hint { margin-top: 4px; color: var(--sub); font-size: 13px; }
+.flash-mask { display: flex; min-height: 110px; margin-top: 16px; padding: 20px 14px; align-items: center; justify-content: center; color: var(--sub); font-size: 14px; border: 1px dashed var(--line); border-radius: 12px; }
+.flash-answer { margin-top: 16px; text-align: left; }
+.flash-answer .fformula { margin-bottom: 8px; }
+.flash-actions { margin-top: 14px; }
+.flash-actions .primary { margin-top: 0; }
+.chip.danger { color: var(--bad-b); border-color: var(--bad-b); }
+
+.plan-list { display: grid; gap: 8px; }
+.plan-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 40px; align-items: center; gap: 10px; }
+.plan-label { color: var(--sub); font-size: 12px; }
+.plan-track { height: 8px; overflow: hidden; background: var(--line); border-radius: 4px; }
+.plan-track i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), #7a5cf6); border-radius: inherit; transition: width .3s; }
+.plan-count { color: var(--sub); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 
 @media (min-width: 700px) {
   .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

@@ -178,7 +178,23 @@ function scopeChips(onChange) {
 
 // 异步导航令牌：用户快速返回/切换页面时，丢弃已经过期的异步渲染结果
 let navToken = 0;
-const newNav = () => ++navToken;
+let focusTimer = null;
+let pkTimer = null;
+function stopAuxTimers() {
+  if (focusTimer) {
+    clearInterval(focusTimer);
+    focusTimer = null;
+  }
+  if (pkTimer) {
+    clearInterval(pkTimer);
+    pkTimer = null;
+  }
+}
+const newNav = () => {
+  ++navToken;
+  stopAuxTimers();
+  return navToken;
+};
 const navIsCurrent = (token) => token === navToken;
 const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
@@ -583,13 +599,14 @@ async function renderHome() {
   ANIMAL_CACHE = null;
   formulaScope = "all";
 
-  let cats, st, pf, formulas;
+  let cats, st, pf, formulas, quests;
   try {
-    [cats, st, pf, formulas] = await Promise.all([
+    [cats, st, pf, formulas, quests] = await Promise.all([
       call("list_categories"),
       call("get_stats"),
       call("get_profile", { today: today() }),
       call("list_formulas", { today: today() }),
+      call("get_daily_quests", { today: today() }),
     ]);
   } catch (err) {
     if (navIsCurrent(token)) renderError(err);
@@ -607,6 +624,8 @@ async function renderHome() {
   const right = catRight + drillRight;
   const wrongs = st.wrong?.length || 0;
   const got = pf.achievement_count;
+  const questDone = quests.filter((q) => q.progress >= q.target).length;
+  const questReady = quests.filter((q) => q.progress >= q.target && !q.claimed).length;
 
   const dailyNode = card(
     "📅 每日挑战",
@@ -668,6 +687,22 @@ async function renderHome() {
       h("span", {}, `错题 ${wrongs}`),
       h("span", {}, `待复习 ${pf.review_due}`)
     ),
+    h(
+      "button",
+      { class: "quest-strip", type: "button", onclick: renderEfficiency },
+      h(
+        "span",
+        { class: "qs-main" },
+        h("b", {}, "今日任务"),
+        h("span", {}, `${questDone}/${quests.length} 完成` + (questReady ? ` · ${questReady} 项可领取` : ""))
+      ),
+      h(
+        "span",
+        { class: "qs-dots", "aria-hidden": "true" },
+        quests.map((q) => h("i", { class: q.progress >= q.target ? "done" : "" }))
+      ),
+      h("span", { class: "go" }, "›")
+    ),
     section(
       "开始",
       todayNote,
@@ -689,7 +724,7 @@ async function renderHome() {
         card("📚 题库练习", `${totalQ} 题 · 五大分类`, renderLibrary),
         formulaNode,
         card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
-        card("📈 复习计划", "艾宾浩斯 · 未来 7 天", renderReviewPlan)
+        card("🎯 效率中心", `任务 ${questDone}/${quests.length} · 专注/周报/PK`, renderEfficiency)
       )
     ),
     section(
@@ -764,6 +799,531 @@ async function renderLibrary() {
       h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
     )
   );
+}
+
+function questRow(q, onClaim) {
+  const pctDone = Math.min(100, (q.progress / Math.max(1, q.target)) * 100);
+  return h(
+    "div",
+    { class: "quest-row" + (q.claimed ? " done" : "") },
+    h(
+      "div",
+      { class: "qmain" },
+      h("b", {}, q.title),
+      h("span", {}, `${q.progress}/${q.target} · +${q.reward} XP`)
+    ),
+    h("div", { class: "qbar" }, h("i", { style: `width:${pctDone}%` })),
+    q.claimed
+      ? h("span", { class: "qtag" }, "已领取")
+      : q.progress >= q.target
+        ? h("button", { class: "primary qclaim", type: "button", onclick: onClaim }, "领取")
+        : h("span", { class: "qtag" }, "进行中")
+  );
+}
+
+async function claimQuest(id) {
+  try {
+    const aw = await call("claim_daily_quest", { today: today(), id });
+    celebrate(aw);
+    toast("任务奖励已领取");
+    renderEfficiency();
+  } catch {
+    // call 已提示错误
+  }
+}
+
+async function renderEfficiency() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let pf, quests;
+  try {
+    [pf, quests] = await Promise.all([
+      call("get_profile", { today: today() }),
+      call("get_daily_quests", { today: today() }),
+    ]);
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("span", {}, `今日专注 ${pf.focus_minutes}/${pf.focus_goal} 分钟`)
+    ),
+    h("h1", {}, "效率中心"),
+    h("p", { class: "sub" }, "把今天的任务清掉，再用专注和复盘把效率拉满。"),
+    section(
+      "今日任务",
+      "完成任务领 XP",
+      h(
+        "div",
+        { class: "quest-list" },
+        quests.map((q) => questRow(q, () => claimQuest(q.id)))
+      )
+    ),
+    section(
+      "工具",
+      "专注 · 复盘 · 对战",
+      h(
+        "div",
+        { class: "grid2" },
+        card("⏱️ 专注学习", `${pf.focus_minutes}/${pf.focus_goal} 分钟 · 番茄钟`, renderFocus),
+        card("📊 学习周报", "近 7 天趋势 · 薄弱分类", renderWeekly),
+        card("⚔️ 学习搭子 PK", "离线对战 · 每日一题", renderPK),
+        card("📈 复习计划", "艾宾浩斯曲线 · 未来 7 天", renderReviewPlan)
+      )
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+    )
+  );
+}
+
+const FOCUS_PRESETS = [25, 45, 60];
+
+function clockText(seconds) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function stopFocusTimer() {
+  if (focusTimer) {
+    clearInterval(focusTimer);
+    focusTimer = null;
+  }
+}
+
+function updateFocusView() {
+  if (!FOCUS) return;
+  const total = FOCUS.minutes * 60;
+  const done = total - FOCUS.remaining;
+  FOCUS.ui.time.textContent = clockText(FOCUS.remaining);
+  FOCUS.ui.status.textContent = FOCUS.finished
+    ? "已完成，去休息一下"
+    : FOCUS.running
+      ? "专注中，先不看手机"
+      : "准备好后开始";
+  FOCUS.ui.bar.style.width = `${Math.max(0, Math.min(100, (done / total) * 100))}%`;
+  FOCUS.ui.main.textContent = FOCUS.running ? "暂停" : FOCUS.finished ? "再来一次" : "开始专注";
+  FOCUS.ui.reset.classList.toggle("hidden", !FOCUS.running && FOCUS.remaining === total);
+  FOCUS.ui.presets.forEach((b) => {
+    b.disabled = FOCUS.running;
+    b.classList.toggle("on", Number(b.dataset.minutes) === FOCUS.minutes);
+  });
+}
+
+function focusTick() {
+  if (!FOCUS || !FOCUS.running) return;
+  FOCUS.remaining = Math.max(0, Math.ceil((FOCUS.endAt - Date.now()) / 1000));
+  updateFocusView();
+  if (FOCUS.remaining <= 0) completeFocus();
+}
+
+function focusToggle() {
+  if (!FOCUS || FOCUS.busy) return;
+  if (FOCUS.finished) {
+    FOCUS.finished = false;
+    FOCUS.remaining = FOCUS.minutes * 60;
+    updateFocusView();
+    return;
+  }
+  if (FOCUS.running) {
+    FOCUS.remaining = Math.max(0, Math.ceil((FOCUS.endAt - Date.now()) / 1000));
+    FOCUS.running = false;
+    stopFocusTimer();
+    updateFocusView();
+    return;
+  }
+  FOCUS.running = true;
+  FOCUS.endAt = Date.now() + FOCUS.remaining * 1000;
+  stopFocusTimer();
+  focusTimer = setInterval(focusTick, 250);
+  updateFocusView();
+}
+
+function resetFocus() {
+  if (!FOCUS || FOCUS.busy) return;
+  FOCUS.running = false;
+  FOCUS.finished = false;
+  FOCUS.remaining = FOCUS.minutes * 60;
+  stopFocusTimer();
+  updateFocusView();
+}
+
+async function completeFocus() {
+  if (!FOCUS || FOCUS.busy) return;
+  FOCUS.busy = true;
+  FOCUS.running = false;
+  stopFocusTimer();
+  const session = FOCUS;
+  const minutes = FOCUS.minutes;
+  FOCUS.remaining = 0;
+  updateFocusView();
+  try {
+    const r = await call("record_focus", { minutes, today: today() });
+    celebrate(r.award);
+    toast(`专注 ${r.minutes} 分钟，获得 ${r.award.xp} XP`);
+    if (FOCUS === session) {
+      FOCUS.finished = true;
+      FOCUS.remaining = 0;
+      updateFocusView();
+    }
+  } catch {
+    if (FOCUS === session) {
+      FOCUS.finished = false;
+      FOCUS.remaining = FOCUS.minutes * 60;
+      updateFocusView();
+    }
+  } finally {
+    if (FOCUS === session) FOCUS.busy = false;
+  }
+}
+
+async function renderFocus() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let pf;
+  try {
+    pf = await call("get_profile", { today: today() });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+
+  FOCUS = {
+    minutes: 25,
+    remaining: 25 * 60,
+    running: false,
+    finished: false,
+    busy: false,
+    endAt: 0,
+    ui: {},
+  };
+  const time = h("div", { class: "focus-time", "aria-live": "off" }, "25:00");
+  const status = h("div", { class: "focus-status" }, "准备好后开始");
+  const bar = h("i", { style: "width:0%" });
+  const presets = FOCUS_PRESETS.map((m) =>
+    h(
+      "button",
+      {
+        class: "chip",
+        type: "button",
+        "data-minutes": m,
+        onclick: () => {
+          if (!FOCUS || FOCUS.running || FOCUS.busy) return;
+          FOCUS.minutes = m;
+          FOCUS.remaining = m * 60;
+          FOCUS.finished = false;
+          updateFocusView();
+        },
+      },
+      `${m} 分钟`
+    )
+  );
+  const main = h("button", { class: "primary", type: "button", onclick: focusToggle }, "开始专注");
+  const reset = h("button", { class: "link hidden", type: "button", onclick: resetFocus }, "重置");
+  FOCUS.ui = { time, status, bar, presets, main, reset };
+  updateFocusView();
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "← 效率中心"),
+      h("span", {}, `今日 ${pf.focus_minutes} 分钟`)
+    ),
+    h("h1", {}, "专注学习"),
+    h("p", { class: "sub" }, "选一个时长，专注做完一件事。完成后按分钟获得 XP。"),
+    h(
+      "div",
+      { class: "focus-card" },
+      h("div", { class: "focus-orbit" }, time, status),
+      h("div", { class: "focus-bar" }, bar),
+      h("div", { class: "focus-presets" }, presets),
+      h("div", { class: "focus-actions" }, main, reset)
+    ),
+    h("p", { class: "kbd-hint" }, "离开页面会停止计时；单日专注上限 180 分钟。"),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "返回效率中心")
+    )
+  );
+}
+
+async function renderWeekly() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let report;
+  try {
+    report = await call("get_weekly_report", { today: today() });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+
+  const max = Math.max(1, ...report.days.map((d) => d.count));
+  const maxCat = Math.max(1, ...report.categories.map((c) => c.done));
+  const catRows = report.categories.length
+    ? report.categories.map((c) =>
+        h(
+          "div",
+          { class: "wcat" },
+          h(
+            "div",
+            { class: "wcat-head" },
+            h("b", {}, c.name),
+            h("span", {}, `${c.done} 题 · ${pct(c.right, c.done)}`)
+          ),
+          h("div", { class: "qbar" }, h("i", { style: `width:${(c.done / maxCat) * 100}%` }))
+        )
+      )
+    : [h("p", { class: "sub" }, "本周还没有答题记录。")];
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "← 效率中心"),
+      h("span", {}, `${report.start_date} — ${report.end_date}`)
+    ),
+    h("h1", {}, "学习周报"),
+    h("p", { class: "sub" }, "看看这一周的节奏，找到最值得改进的一环。"),
+    h(
+      "div",
+      { class: "statline" },
+      h("span", {}, `答题 ${report.total}`),
+      h("span", {}, `正确率 ${pct(report.correct, report.total)}`),
+      h("span", {}, `活跃 ${report.active_days} 天`),
+      h("span", {}, `日均 ${report.average} 题`)
+    ),
+    section(
+      "近 7 天",
+      `最佳 ${report.best_day || "—"}`,
+      h(
+        "div",
+        { class: "wchart" },
+        report.days.map((d) =>
+          h(
+            "div",
+            { class: "wday" + (d.count ? " active" : "") },
+            h("span", { class: "wcount" }, d.count ? String(d.count) : ""),
+            h("div", { class: "wbar" }, h("i", { style: `height:${Math.max(4, (d.count / max) * 100)}%` })),
+            h("small", {}, d.label)
+          )
+        )
+      )
+    ),
+    section("分类表现", "正确率从低到高", h("div", { class: "wcats" }, catRows)),
+    report.weakest
+      ? h(
+          "div",
+          { class: "fact-card" },
+          h("div", { class: "fact-title" }, "🎯 本周建议"),
+          h("p", {}, `「${report.weakest.name}」正确率偏低，建议回看错题并做一组专项练习。`),
+          h(
+            "button",
+            { class: "primary", type: "button", onclick: () => start(report.weakest.name) },
+            `练习 ${report.weakest.name}`
+          )
+        )
+      : null,
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "返回效率中心")
+    )
+  );
+}
+
+function pkTick() {
+  if (!PK || !PK.active || PK.answered) return;
+  PK.remaining = Math.max(0, PK.remaining - 1);
+  if (PK.ui?.time) PK.ui.time.textContent = `⏱ ${PK.remaining}s`;
+  if (PK.remaining <= 0) finishPK(null);
+}
+
+async function renderPK() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let base;
+  try {
+    base = await call("get_questions", { mode: "全部", today: today() });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+  if (!base.length) {
+    toast("暂时没有可用的 PK 题目");
+    return;
+  }
+  const q = shuffle(base)[0];
+  const order = shuffle(q.options.map((_, i) => i));
+  const seed = Number(today().replace(/-/g, ""));
+  PK = {
+    q,
+    order,
+    remaining: 30,
+    botScore: 8 + ((q.id + seed) % 8),
+    answered: false,
+    active: true,
+    ui: {},
+  };
+
+  const time = h("span", { class: "pk-timer" }, `⏱ ${PK.remaining}s`);
+  const opts = order.map((original, k) =>
+    h(
+      "button",
+      { class: "opt", type: "button", onclick: () => finishPK(k) },
+      h("b", {}, String.fromCharCode(65 + k)),
+      h("span", {}, q.options[original])
+    )
+  );
+  PK.ui = { time };
+  pkTimer = setInterval(pkTick, 1000);
+
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "← 效率中心"),
+      time
+    ),
+    h("h1", {}, "学习搭子 PK"),
+    h("p", { class: "sub" }, "30 秒内答对得基础分，答得越快加分越多。对手是离线学习搭子。"),
+    h("div", { class: "pk-bot" }, "🐾 学习搭子已就位，准备好了吗？"),
+    h("p", { class: "stem" }, q.stem),
+    h("div", { class: "opts", role: "group", "aria-label": "PK 选项" }, opts),
+    h("p", { class: "kbd-hint" }, "按 1–4 作答；超时视为放弃本题。")
+  );
+}
+
+async function finishPK(choiceIndex) {
+  if (!PK || !PK.active || PK.answered) return;
+  PK.answered = true;
+  if (pkTimer) {
+    clearInterval(pkTimer);
+    pkTimer = null;
+  }
+  const session = PK;
+  const q = session.q;
+  let userScore = 0;
+  let correct = false;
+  let explanation = "超时未作答。";
+  if (choiceIndex !== null) {
+    const choice = session.order[choiceIndex];
+    try {
+      const r = await call("submit_answer", {
+        id: q.id,
+        choice,
+        combo: 0,
+        today: today(),
+        mode: "学习搭子 PK",
+      });
+      if (PK !== session) return;
+      correct = r.correct;
+      explanation = r.explanation;
+      userScore = correct ? 10 + Math.min(10, Math.ceil(session.remaining / 5)) : 0;
+      celebrate(r.award);
+    } catch {
+      if (PK === session) PK.active = false;
+      return;
+    }
+  }
+  if (PK !== session) return;
+  PK.active = false;
+  PK.result = { q, userScore, botScore: session.botScore, correct, explanation };
+  renderPKResult(PK.result);
+}
+
+function renderPKResult(result) {
+  const { q, userScore, botScore, correct, explanation } = result;
+  const outcome = userScore > botScore ? "你赢了！" : userScore === botScore ? "平局" : "学习搭子略胜一筹";
+  const answer =
+    q.options[q.answer] != null ? q.options[q.answer] : "暂无";
+  screen(
+    h(
+      "div",
+      { class: "bar" },
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "← 效率中心"),
+      h("span", {}, "离线对战")
+    ),
+    h("h1", {}, "PK 结果"),
+    h("div", { class: "center" }, h("div", { class: "big" }, outcome)),
+    h(
+      "div",
+      { class: "pk-score" },
+      h("div", {}, h("b", {}, String(userScore)), h("span", {}, "你")),
+      h("div", { class: "vs" }, "VS"),
+      h("div", {}, h("b", {}, String(botScore)), h("span", {}, "学习搭子"))
+    ),
+    h(
+      "div",
+      { class: "exp" },
+      h("div", {}, correct ? "✓ 本题答对。" : "✗ 本题未答对。"),
+      h("div", { class: "note" }, `正确答案：${answer}`),
+      h("div", {}, explanation)
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("button", { class: "primary", type: "button", onclick: renderPK }, "再来一局"),
+      h("button", { class: "link", type: "button", onclick: sharePK }, "分享战绩"),
+      h("button", { class: "link", type: "button", onclick: renderEfficiency }, "返回效率中心")
+    )
+  );
+}
+
+async function sharePK() {
+  const r = PK?.result;
+  const text = r
+    ? `我在行测刷题的学习搭子 PK 中拿到 ${r.userScore} 分，学习搭子 ${r.botScore} 分，来挑战我！`
+    : "我在行测刷题练习，来和我一起卷！";
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "行测刷题 · 学习搭子 PK", text });
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      toast("战绩已复制");
+    } else {
+      toast("当前环境不支持分享");
+    }
+  } catch {
+    // 用户取消分享时保持当前页面
+  }
 }
 
 async function resetAll() {
@@ -931,7 +1491,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.7.0 · 500 道题库 · 99 位动物 · 888 个成就")
+          h("div", { class: "d" }, "0.8.0 · 每日任务 · 专注学习 · 学习周报 · PK")
         )
       )
     ),
@@ -2054,6 +2614,8 @@ let S = null;
 let F = null;
 let FC = null;
 let FP = null;
+let FOCUS = null;
+let PK = null;
 let FORMULAS_CACHE = null;
 let memorizeFormulas = true;
 let formulaScope = "all";

@@ -1367,6 +1367,29 @@ fn day_num(s: &str) -> Option<i64> {
     Some(days_from_civil(y, m, d))
 }
 
+fn civil_from_days(day: i64) -> (i64, u32, u32) {
+    let z = day + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    (y + if m <= 2 { 1 } else { 0 }, m as u32, d as u32)
+}
+
+fn date_string(day: i64) -> String {
+    let (y, m, d) = civil_from_days(day);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn weekday_label(day: i64) -> &'static str {
+    const LABELS: [&str; 7] = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    LABELS[(((day + 3) % 7 + 7) % 7) as usize]
+}
+
 fn require_day(today: &str) -> Result<(), String> {
     if day_num(today).is_some() {
         Ok(())
@@ -1490,6 +1513,12 @@ struct Progress {
     animals: BTreeSet<String>,
     // 答题历史（最多 HISTORY_LIMIT 条）
     history: Vec<HistoryLog>,
+    // 专注学习
+    focus_day: String,
+    focus_minutes: u32,
+    // 每日任务领取状态
+    quest_day: String,
+    quest_claimed: BTreeSet<String>,
 }
 
 struct AppState {
@@ -2094,6 +2123,8 @@ struct Profile {
     history_count: usize,
     achievement_count: usize,
     achievement_total: usize,
+    focus_minutes: u32,
+    focus_goal: u32,
     animals: Vec<AnimalView>,
 }
 
@@ -2139,6 +2170,12 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
             .filter(|d| p.achv.contains(&d.id))
             .count(),
         achievement_total: achievement_defs().len(),
+        focus_minutes: if p.focus_day == today {
+            p.focus_minutes
+        } else {
+            0
+        },
+        focus_goal: 60,
         animals: animal_defs()
             .iter()
             .map(|d| AnimalView {
@@ -2168,6 +2205,249 @@ fn get_achievements(state: State<AppState>) -> Vec<AchvView> {
             unlocked: p.achv.contains(&d.id),
         })
         .collect()
+}
+
+#[derive(Serialize, Clone)]
+struct DailyQuest {
+    id: &'static str,
+    title: &'static str,
+    desc: &'static str,
+    target: u32,
+    progress: u32,
+    reward: u32,
+    claimed: bool,
+}
+
+fn daily_quests(p: &Progress, today: &str) -> Vec<DailyQuest> {
+    let today_count = if p.today == today { p.today_count } else { 0 };
+    let today_correct = p
+        .history
+        .iter()
+        .filter(|h| h.day == today && h.correct)
+        .count() as u32;
+    let today_review = p
+        .history
+        .iter()
+        .filter(|h| h.day == today && h.mode == "智能复习")
+        .count() as u32;
+    let claimed = |id: &str| p.quest_day == today && p.quest_claimed.contains(id);
+    vec![
+        DailyQuest {
+            id: "warmup",
+            title: "热身 10 题",
+            desc: "今天累计完成 10 道题",
+            target: 10,
+            progress: today_count.min(10),
+            reward: 20,
+            claimed: claimed("warmup"),
+        },
+        DailyQuest {
+            id: "accuracy",
+            title: "答对 8 题",
+            desc: "今天累计答对 8 道题",
+            target: 8,
+            progress: today_correct.min(8),
+            reward: 20,
+            claimed: claimed("accuracy"),
+        },
+        DailyQuest {
+            id: "review",
+            title: "复习 5 题",
+            desc: "完成一组智能复习中的 5 道题",
+            target: 5,
+            progress: today_review.min(5),
+            reward: 30,
+            claimed: claimed("review"),
+        },
+    ]
+}
+
+#[tauri::command]
+fn get_daily_quests(state: State<AppState>, today: String) -> Vec<DailyQuest> {
+    let p = state.progress();
+    daily_quests(&p, &today)
+}
+
+#[tauri::command]
+fn claim_daily_quest(
+    state: State<AppState>,
+    today: String,
+    id: String,
+) -> Result<AwardInfo, String> {
+    require_day(&today)?;
+    let mut p = state.progress();
+    if p.quest_day != today {
+        p.quest_day = today.clone();
+        p.quest_claimed.clear();
+    }
+    let quest = daily_quests(&p, &today)
+        .into_iter()
+        .find(|q| q.id == id.as_str())
+        .ok_or_else(|| format!("每日任务 {id} 不存在"))?;
+    if quest.claimed {
+        return Err("该任务奖励已领取".into());
+    }
+    if quest.progress < quest.target {
+        return Err("任务尚未完成".into());
+    }
+    p.quest_claimed.insert(id);
+    let aw = award(
+        &mut p,
+        &today,
+        Event {
+            base_xp: quest.reward,
+            ..Default::default()
+        },
+    );
+    state.save(&p);
+    Ok(aw)
+}
+
+#[derive(Serialize)]
+struct FocusResult {
+    minutes: u32,
+    total_minutes: u32,
+    award: AwardInfo,
+}
+
+#[tauri::command]
+fn record_focus(
+    state: State<AppState>,
+    minutes: u32,
+    today: String,
+) -> Result<FocusResult, String> {
+    require_day(&today)?;
+    let requested = minutes.clamp(1, 120);
+    let mut p = state.progress();
+    if p.focus_day != today {
+        p.focus_day = today.clone();
+        p.focus_minutes = 0;
+    }
+    let remaining = 180u32.saturating_sub(p.focus_minutes);
+    let added = requested.min(remaining);
+    if added == 0 {
+        return Err("今日专注时长已达上限".into());
+    }
+    p.focus_minutes = p.focus_minutes.saturating_add(added);
+    let aw = award(
+        &mut p,
+        &today,
+        Event {
+            base_xp: added.saturating_mul(2),
+            ..Default::default()
+        },
+    );
+    let total_minutes = p.focus_minutes;
+    state.save(&p);
+    Ok(FocusResult {
+        minutes: added,
+        total_minutes,
+        award: aw,
+    })
+}
+
+#[derive(Serialize, Clone)]
+struct DayReport {
+    date: String,
+    label: &'static str,
+    count: u32,
+    correct: u32,
+}
+
+#[derive(Serialize, Clone)]
+struct CategoryReport {
+    name: String,
+    done: u32,
+    right: u32,
+}
+
+#[derive(Serialize)]
+struct WeeklyReport {
+    start_date: String,
+    end_date: String,
+    days: Vec<DayReport>,
+    total: u32,
+    correct: u32,
+    active_days: usize,
+    average: u32,
+    best_day: String,
+    categories: Vec<CategoryReport>,
+    weakest: Option<CategoryReport>,
+}
+
+#[tauri::command]
+fn get_weekly_report(state: State<AppState>, today: String) -> WeeklyReport {
+    let today_num = day_num(&today).unwrap_or(0);
+    let start = today_num - 6;
+    let p = state.progress();
+    let mut by_day: BTreeMap<i64, (u32, u32)> = BTreeMap::new();
+    let mut by_cat: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    for h in &p.history {
+        let Some(d) = day_num(&h.day) else { continue };
+        if d < start || d > today_num {
+            continue;
+        }
+        let day = by_day.entry(d).or_insert((0, 0));
+        day.0 = day.0.saturating_add(1);
+        if h.correct {
+            day.1 = day.1.saturating_add(1);
+        }
+        let cat = by_cat.entry(h.category.clone()).or_insert((0, 0));
+        cat.0 = cat.0.saturating_add(1);
+        if h.correct {
+            cat.1 = cat.1.saturating_add(1);
+        }
+    }
+
+    let mut days = Vec::with_capacity(7);
+    let mut total = 0u32;
+    let mut correct = 0u32;
+    let mut active_days = 0usize;
+    let mut best_day = String::new();
+    let mut best_count = 0u32;
+    for offset in 0..7 {
+        let d = start + offset;
+        let (count, right) = by_day.get(&d).copied().unwrap_or((0, 0));
+        total = total.saturating_add(count);
+        correct = correct.saturating_add(right);
+        if count > 0 {
+            active_days += 1;
+        }
+        if count > 0 && count >= best_count {
+            best_count = count;
+            best_day = date_string(d);
+        }
+        days.push(DayReport {
+            date: date_string(d),
+            label: weekday_label(d),
+            count,
+            correct: right,
+        });
+    }
+
+    let mut categories: Vec<CategoryReport> = by_cat
+        .into_iter()
+        .map(|(name, (done, right))| CategoryReport { name, done, right })
+        .collect();
+    categories.sort_by(|a, b| {
+        let aa = a.right as f64 / a.done.max(1) as f64;
+        let bb = b.right as f64 / b.done.max(1) as f64;
+        aa.partial_cmp(&bb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let weakest = categories.iter().find(|c| c.done >= 3).cloned();
+
+    WeeklyReport {
+        start_date: date_string(start),
+        end_date: date_string(today_num),
+        days,
+        total,
+        correct,
+        active_days,
+        average: total / 7,
+        best_day,
+        categories,
+        weakest,
+    }
 }
 
 #[derive(Serialize)]
@@ -2737,6 +3017,10 @@ pub fn run() {
             clear_history,
             get_profile,
             get_achievements,
+            get_daily_quests,
+            claim_daily_quest,
+            record_focus,
+            get_weekly_report,
             get_review_plan,
             reset_progress,
             list_formulas,
@@ -2953,6 +3237,9 @@ mod tests {
         assert!(day_num("2024-02-29").is_some());
         assert_eq!(day_num("2026-02-29"), None);
         assert_eq!(day_num("2026-04-31"), None);
+        assert_eq!(date_string(0), "1970-01-01");
+        assert_eq!(weekday_label(0), "周四");
+        assert_eq!(date_string(day_num("2026-11-09").unwrap()), "2026-11-09");
     }
 
     #[test]

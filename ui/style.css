@@ -461,6 +461,71 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
   .badge:hover { border-color: var(--primary); }
 }
 
+.quest-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 11px 14px;
+  color: inherit;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.qs-main { display: flex; flex: 1; align-items: baseline; gap: 8px; min-width: 0; }
+.qs-main b { font-size: 14px; }
+.qs-main span { color: var(--sub); font-size: 12px; }
+.qs-dots { display: flex; gap: 5px; }
+.qs-dots i { width: 7px; height: 7px; background: var(--line); border-radius: 999px; }
+.qs-dots i.done { background: var(--ok-b); }
+.quest-list { display: grid; gap: 10px; }
+.quest-row {
+  position: relative;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.quest-row.done { opacity: .75; }
+.qmain { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.qmain b { font-size: 14px; }
+.qmain span { color: var(--sub); font-size: 12px; }
+.qbar { height: 5px; margin-top: 8px; overflow: hidden; background: var(--line); border-radius: 999px; }
+.qbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), #7a5cf6); border-radius: inherit; }
+.qtag { display: inline-block; margin-top: 7px; color: var(--sub); font-size: 11px; }
+.qclaim { min-height: 32px; margin-top: 8px; padding: 4px 14px; font-size: 13px; }
+.focus-card { margin-top: 6px; padding: 22px 16px 16px; text-align: center; background: linear-gradient(160deg, var(--card), var(--primary-weak)); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); }
+.focus-orbit { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.focus-time { font-size: 56px; font-weight: 700; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.focus-status { color: var(--sub); font-size: 13px; }
+.focus-bar { height: 7px; margin: 18px auto 12px; overflow: hidden; background: var(--line); border-radius: 999px; }
+.focus-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), #7a5cf6); border-radius: inherit; transition: width .3s; }
+.focus-presets { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.focus-actions { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+.wchart { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 7px; align-items: end; height: 170px; padding: 8px 4px 0; }
+.wday { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+.wcount { min-height: 16px; color: var(--sub); font-size: 10px; }
+.wbar { display: flex; align-items: flex-end; width: 100%; height: 105px; background: var(--line); border-radius: 7px 7px 4px 4px; overflow: hidden; }
+.wbar i { display: block; width: 100%; min-height: 4px; background: var(--line); border-radius: inherit; }
+.wday.active .wbar i { background: linear-gradient(180deg, #7a5cf6, var(--primary)); }
+.wday small { color: var(--sub); font-size: 10px; white-space: nowrap; }
+.wcats { display: grid; gap: 10px; }
+.wcat { padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.wcat-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.wcat-head span { color: var(--sub); font-size: 12px; }
+.pk-timer { color: var(--fire); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pk-bot { margin: 4px 0 12px; padding: 9px 12px; color: var(--sub); font-size: 13px; background: var(--primary-weak); border-radius: 12px; }
+.pk-score { display: flex; align-items: center; justify-content: center; gap: 26px; margin: 10px 0 18px; }
+.pk-score > div:not(.vs) { display: flex; flex-direction: column; align-items: center; min-width: 70px; }
+.pk-score b { font-size: 38px; line-height: 1.1; }
+.pk-score span { color: var(--sub); font-size: 12px; }
+.pk-score .vs { color: var(--sub); font-size: 13px; }
+.fact-card .primary { margin-top: 8px; }
+
 @media (min-width: 700px) {
   .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

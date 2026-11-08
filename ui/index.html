@@ -3,12 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f6fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#12141a" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="行测刷题：题库练习、每日挑战、速算训练与错题本。">
   <title>行测刷题</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main id="app"></main>
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript>本应用需要启用 JavaScript。</noscript>
   <script src="app.js"></script>
 </body>
 </html>

@@ -2,24 +2,28 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::PathBuf,
-    sync::Mutex,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, State};
 
 const CATS: [&str; 5] = ["言语理解", "数量关系", "判断推理", "资料分析", "常识判断"];
+const DAILY_COUNT: usize = 5;
+const PROGRESS_FILE: &str = "progress.json";
+const BACKUP_FILE: &str = "progress.backup.json";
 
-/// (名称, 说明, 速算小贴士)。第一项"综合"表示随机混合其余各类。
+/// (名称， 说明， 速算小贴士)。第一项"综合"表示随机混合其余各类。
 const DRILLS: [(&str, &str, &str); 8] = [
-    ("综合", "各类速算随机混合", "先看数字特征再动笔:能凑整就凑整,能拆分就拆分,心算不出再列竖式。"),
-    ("加减", "三、四位数加减法", "凑整法:397+256 = 400+256−3;减法可以先多减再补回,如 842−298 = 842−300+2。"),
-    ("乘法", "两位数乘法与特殊乘数", "×11:首尾拆开中间相加(35×11=385);×25:÷4再×100;×15:×10再加一半;两位数×两位数可拆成 (a×10)+(a×个位)。"),
-    ("平方", "11–35 的平方", "个位是5:十位×(十位+1)后接25,如 35²→3×4=12→1225。其余用 (a±b)² 展开,如 23²=20²+2×20×3+3²=529。"),
+    ("综合", "各类速算随机混合", "先看数字特征再动笔：能凑整就凑整，能拆分就拆分，心算不出再列竖式。"),
+    ("加减", "三、四位数加减法", "凑整法：397+256 = 400+256−3;减法可以先多减再补回，如 842−298 = 842−300+2。"),
+    ("乘法", "两位数乘法与特殊乘数", "×11:首尾拆开中间相加(35×11=385);×25:÷4再×100;×15:×10再加一半；两位数×两位数可拆成 (a×10)+(a×个位)。"),
+    ("平方", "11–35 的平方", "个位是5:十位×(十位+1)后接25,如 35²→3×4=12→1225。其余用 (a±b)² 展开，如 23²=20²+2×20×3+3²=529。"),
     ("除法", "整除除法", "÷5 = ×2÷10;÷25 = ×4÷100;÷4 可连除两次2;÷9、÷11 可先估商再验算。"),
-    ("分数", "分数化百分数(保留1位小数)", "牢记:1/3≈33.3%、1/6≈16.7%、1/7≈14.3%、1/8=12.5%、1/9≈11.1%、1/11≈9.1%、1/12≈8.3%、1/16=6.25%。其余分数由它们倍数推出。"),
+    ("分数", "分数化百分数(保留1位小数)", "牢记：1/3≈33.3%、1/6≈16.7%、1/7≈14.3%、1/8=12.5%、1/9≈11.1%、1/11≈9.1%、1/12≈8.3%、1/16=6.25%。其余分数由它们倍数推出。"),
     ("增长", "增长/下降百分比计算", "增长15% = 原数 + 10% + 5%;下降20% 即乘0.8(原数×4÷5);增长25% 即乘1.25(原数×5÷4)。"),
-    ("混合", "四则混合运算", "先乘除后加减,有括号先算括号;先估个位数验证结果是否合理。"),
+    ("混合", "四则混合运算", "先乘除后加减，有括号先算括号；先估个位数验证结果是否合理。"),
 ];
 
 /* ---------------- 游戏化常量 ---------------- */
@@ -30,11 +34,21 @@ const DAILY_BONUS: u32 = 30; // 完成每日挑战奖励 XP
 
 /// 职级称号(等级 1..=12)
 const TITLES: [&str; 12] = [
-    "见习考生", "初级科员", "科员", "副主任科员", "主任科员", "副科长",
-    "正科长", "副处长", "正处长", "副厅长", "正厅长", "部长",
+    "见习考生",
+    "初级科员",
+    "科员",
+    "副主任科员",
+    "主任科员",
+    "副科长",
+    "正科长",
+    "副处长",
+    "正处长",
+    "副厅长",
+    "正厅长",
+    "部长",
 ];
 
-/// (id, 图标, 名称, 说明)
+/// (id, 图标， 名称， 说明)
 const ACHV: [(&str, &str, &str, &str); 13] = [
     ("first", "🌱", "初出茅庐", "完成第一道题"),
     ("ans100", "📚", "题海战术", "累计答题 100 道"),
@@ -44,7 +58,12 @@ const ACHV: [(&str, &str, &str, &str); 13] = [
     ("streak30", "👑", "月度坚持", "连续打卡 30 天"),
     ("combo10", "🎯", "连对达人", "连续答对 10 题"),
     ("perfect", "🧮", "神算子", "计算训练 10 题以上全部答对"),
-    ("fast", "🚀", "快如闪电", "计算训练平均 ≤3 秒/题且正确率 ≥90%"),
+    (
+        "fast",
+        "🚀",
+        "快如闪电",
+        "计算训练平均 ≤3 秒/题且正确率 ≥90%",
+    ),
     ("goal", "✅", "今日达标", "完成一次每日目标"),
     ("daily", "📅", "挑战者", "完成一次每日挑战"),
     ("lvl5", "📈", "升职加薪", "升到 5 级"),
@@ -53,16 +72,25 @@ const ACHV: [(&str, &str, &str, &str); 13] = [
 
 fn level_of(xp: u32) -> u32 {
     let mut l = 1u32;
-    while l < 12 && 50 * (l + 1) * l <= xp {
+    while l < TITLES.len() as u32 && 50 * (l + 1) * l <= xp {
         l += 1;
     }
     l
 }
+
 fn level_floor(l: u32) -> u32 {
     50 * l * (l - 1)
 }
+
 fn level_next(l: u32) -> u32 {
     50 * (l + 1) * l
+}
+
+fn title_of(level: u32) -> &'static str {
+    TITLES
+        .get(level.saturating_sub(1) as usize)
+        .copied()
+        .unwrap_or(TITLES[0])
 }
 
 /// 公历日期 → 自 1970-01-01 起的天数(Howard Hinnant 算法)
@@ -76,13 +104,52 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146097 + doe - 719468
 }
 
-/// 解析 "YYYY-MM-DD"
+/// 严格解析 "YYYY-MM-DD";格式不对返回 None,避免脏日期把连续打卡清零。
 fn day_num(s: &str) -> Option<i64> {
-    let mut it = s.split('-');
-    let y = it.next()?.parse().ok()?;
-    let m = it.next()?.parse().ok()?;
-    let d = it.next()?.parse().ok()?;
+    if s.len() != 10 {
+        return None;
+    }
+    let mut parts = s.split('-');
+    let y = parts.next()?;
+    let m = parts.next()?;
+    let d = parts.next()?;
+    if parts.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return None;
+    }
+    if !y
+        .bytes()
+        .chain(m.bytes())
+        .chain(d.bytes())
+        .all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let y: i64 = y.parse().ok()?;
+    let m: i64 = m.parse().ok()?;
+    let d: i64 = d.parse().ok()?;
+    if !(1..=12).contains(&m) {
+        return None;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let max_day = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if d < 1 || d > max_day {
+        return None;
+    }
     Some(days_from_civil(y, m, d))
+}
+
+fn require_day(today: &str) -> Result<(), String> {
+    if day_num(today).is_some() {
+        Ok(())
+    } else {
+        Err(format!("日期格式无效：{today}"))
+    }
 }
 
 /* ---------------- 数据结构 ---------------- */
@@ -134,16 +201,127 @@ struct Progress {
 struct AppState {
     questions: Vec<Question>,
     progress: Mutex<Progress>,
-    path: PathBuf,
+    data_dir: PathBuf,
 }
 
 impl AppState {
+    fn progress(&self) -> MutexGuard<'_, Progress> {
+        // 锁中毒时继续使用内部数据，避免一次 panic 让整个应用不可用。
+        self.progress.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn save(&self, p: &Progress) {
-        if let Ok(s) = serde_json::to_string(p) {
-            let _ = fs::write(&self.path, s);
+        if let Err(e) = save_progress(&self.data_dir, p) {
+            eprintln!("保存进度失败：{e}");
         }
     }
 }
+
+/* ---------------- 进度持久化 ---------------- */
+
+fn progress_path(dir: &Path) -> PathBuf {
+    dir.join(PROGRESS_FILE)
+}
+
+fn read_progress(path: &Path) -> Result<Progress, String> {
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("解析 {} 失败：{e}", path.display()))
+}
+
+/// 读取进度：主文件损坏时自动回退到备份，并把坏档留作排查。
+fn load_progress(dir: &Path) -> Progress {
+    let path = progress_path(dir);
+    if path.exists() {
+        match read_progress(&path) {
+            Ok(p) => return p,
+            Err(e) => {
+                eprintln!("{e};尝试从备份恢复");
+                let corrupt = dir.join("progress.corrupt.json");
+                let _ = fs::rename(&path, &corrupt);
+            }
+        }
+    }
+    match read_progress(&dir.join(BACKUP_FILE)) {
+        Ok(p) => {
+            eprintln!("已从备份恢复进度");
+            p
+        }
+        Err(_) => Progress::default(),
+    }
+}
+
+/// 原子写入：先写临时文件并 fsync,再改名为正式文件；写前保留一份备份。
+fn save_progress(dir: &Path, p: &Progress) -> Result<(), String> {
+    let text = serde_json::to_string(p).map_err(|e| format!("序列化进度失败：{e}"))?;
+    let path = progress_path(dir);
+    let tmp = dir.join("progress.json.tmp");
+
+    {
+        let mut f =
+            fs::File::create(&tmp).map_err(|e| format!("创建 {} 失败：{e}", tmp.display()))?;
+        f.write_all(text.as_bytes())
+            .map_err(|e| format!("写入 {} 失败：{e}", tmp.display()))?;
+        f.sync_all()
+            .map_err(|e| format!("同步 {} 失败：{e}", tmp.display()))?;
+    }
+
+    if path.exists() {
+        let _ = fs::copy(&path, dir.join(BACKUP_FILE));
+    }
+    fs::rename(&tmp, &path).map_err(|e| format!("替换 {} 失败：{e}", path.display()))
+}
+
+/* ---------------- 题库校验 ---------------- */
+
+fn validate_questions(qs: &[Question]) -> Result<(), String> {
+    if qs.is_empty() {
+        return Err("题库为空".into());
+    }
+    let mut ids = BTreeSet::new();
+    for (idx, q) in qs.iter().enumerate() {
+        let at = format!("第 {} 题(id={})", idx + 1, q.id);
+        if !ids.insert(q.id) {
+            return Err(format!("{at}:id 重复"));
+        }
+        if !CATS.contains(&q.category.as_str()) {
+            return Err(format!(
+                "{at}:未知分类 \"{}\",必须是 {}",
+                q.category,
+                CATS.join("、")
+            ));
+        }
+        if q.stem.trim().is_empty() {
+            return Err(format!("{at}:题干为空"));
+        }
+        if q.options.len() < 2 {
+            return Err(format!("{at}:至少需要 2 个选项"));
+        }
+        if q.options.iter().any(|o| o.trim().is_empty()) {
+            return Err(format!("{at}:存在空选项"));
+        }
+        if q.answer >= q.options.len() {
+            return Err(format!(
+                "{at}:answer={} 越界(选项数 {})",
+                q.answer,
+                q.options.len()
+            ));
+        }
+        if q.explanation.trim().is_empty() {
+            return Err(format!("{at}:解析为空"));
+        }
+    }
+    Ok(())
+}
+
+fn load_questions() -> Result<Vec<Question>, String> {
+    let qs: Vec<Question> = serde_json::from_str(include_str!("../questions.json"))
+        .map_err(|e| format!("解析内置题库失败：{e}"))?;
+    validate_questions(&qs)?;
+    Ok(qs)
+}
+
+/* ---------------- 奖励与打卡 ---------------- */
 
 #[derive(Serialize, Clone)]
 struct AchvInfo {
@@ -169,7 +347,7 @@ struct Event {
     base_xp: u32,
     answers: u32,
     combo: u32,
-    drill: Option<(u32, u32, f64)>, // (题数, 答对数, 用时秒)
+    drill: Option<(u32, u32, f64)>, // (题数， 答对数， 用时秒)
     cleared: bool,
     unlock: Option<&'static str>,
 }
@@ -177,7 +355,12 @@ struct Event {
 fn achv_info(id: &str) -> Option<AchvInfo> {
     ACHV.iter()
         .find(|a| a.0 == id)
-        .map(|&(id, icon, name, desc)| AchvInfo { id, icon, name, desc })
+        .map(|&(id, icon, name, desc)| AchvInfo {
+            id,
+            icon,
+            name,
+            desc,
+        })
 }
 
 fn unlock(p: &mut Progress, ids: &mut Vec<&'static str>, id: &'static str) {
@@ -186,8 +369,11 @@ fn unlock(p: &mut Progress, ids: &mut Vec<&'static str>, id: &'static str) {
     }
 }
 
-/// 当天首次活动时更新连续打卡;日期变化时重置今日计数
+/// 当天首次活动时更新连续打卡；日期变化时重置今日计数
 fn touch(p: &mut Progress, today: &str) {
+    if day_num(today).is_none() {
+        return;
+    }
     if p.today != today {
         p.today = today.to_string();
         p.today_count = 0;
@@ -200,20 +386,20 @@ fn touch(p: &mut Progress, today: &str) {
         _ => i64::MAX, // 首次使用
     };
     if gap <= 0 {
-        return; // 系统时间回拨,不处理
+        return; // 系统时间回拨，不处理
     }
     if gap == 1 {
-        p.streak += 1;
+        p.streak = p.streak.saturating_add(1);
     } else if gap == 2 && p.freezes > 0 {
         p.freezes -= 1; // 自动使用补签卡
-        p.streak += 1;
+        p.streak = p.streak.saturating_add(1);
     } else {
         p.streak = 1;
     }
     p.last_active = today.to_string();
     p.best_streak = p.best_streak.max(p.streak);
-    if p.streak % 7 == 0 {
-        p.freezes = (p.freezes + 1).min(2); // 每满7天送一张补签卡,最多持有2张
+    if p.streak.is_multiple_of(7) {
+        p.freezes = (p.freezes + 1).min(2); // 每满7天送一张补签卡，最多持有2张
     }
 }
 
@@ -231,24 +417,27 @@ fn live_streak(p: &Progress, today: &str) -> u32 {
     }
 }
 
-/// 结算一次事件:经验、等级、每日目标、连续打卡、成就
+/// 结算一次事件：经验、等级、每日目标、连续打卡、成就
 fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
     touch(p, today);
     let before = level_of(p.xp);
 
     let mut gained = ev.base_xp;
-    p.today_count += ev.answers;
+    p.today_count = p.today_count.saturating_add(ev.answers);
     let mut goal_hit = false;
     if p.today_count >= DAILY_GOAL && p.goal_hit != today {
         p.goal_hit = today.to_string();
-        gained += GOAL_BONUS;
+        gained = gained.saturating_add(GOAL_BONUS);
         goal_hit = true;
     }
-    p.xp += gained;
+    p.xp = p.xp.saturating_add(gained);
     let level = level_of(p.xp);
 
-    let total: u32 = p.stats.values().map(|s| s.done).sum::<u32>()
-        + p.drill.values().map(|s| s.done).sum::<u32>();
+    let total = p
+        .stats
+        .values()
+        .fold(0u32, |a, s| a.saturating_add(s.done))
+        .saturating_add(p.drill.values().fold(0u32, |a, s| a.saturating_add(s.done)));
     let mut ids: Vec<&'static str> = Vec::new();
     if total >= 1 {
         unlock(p, &mut ids, "first");
@@ -295,7 +484,7 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
     AwardInfo {
         xp: gained,
         level,
-        title: TITLES[(level - 1) as usize],
+        title: title_of(level),
         level_up: level > before,
         goal_hit,
         streak: p.streak,
@@ -303,7 +492,7 @@ fn award(p: &mut Progress, today: &str, ev: Event) -> AwardInfo {
     }
 }
 
-/* ---------------- 题库 ---------------- */
+/* ---------------- 题库命令 ---------------- */
 
 #[derive(Serialize)]
 struct CatInfo {
@@ -318,6 +507,10 @@ struct AnswerResult {
     explanation: String,
     combo: u32,
     award: AwardInfo,
+    /// 本题答对后是否从错题本移除
+    removed_from_wrong: bool,
+    /// 当前错题本剩余题数
+    wrong_left: usize,
 }
 
 #[tauri::command]
@@ -330,32 +523,41 @@ fn list_categories(state: State<AppState>) -> Vec<CatInfo> {
         .collect()
 }
 
+fn daily_questions(qs: &[Question], today: &str) -> Vec<Question> {
+    // 以日期为种子，同一天题目固定；日期非法时退回固定种子。
+    let seed = day_num(today).unwrap_or(0) as u64;
+    let mut r = Rng::seeded(seed);
+    let mut idx: Vec<usize> = (0..qs.len()).collect();
+    for i in (1..idx.len()).rev() {
+        let j = (r.next() % (i as u64 + 1)) as usize;
+        idx.swap(i, j);
+    }
+    idx.truncate(DAILY_COUNT);
+    idx.into_iter().map(|i| qs[i].clone()).collect()
+}
+
 /// mode: "全部" | "错题本" | "每日挑战" | 某个题型名称
 #[tauri::command]
 fn get_questions(state: State<AppState>, mode: String, today: Option<String>) -> Vec<Question> {
-    if mode == "每日挑战" {
-        // 以日期为种子,同一天题目固定
-        let seed = today.as_deref().and_then(day_num).unwrap_or(0) as u64;
-        let mut r = Rng::seeded(seed);
-        let mut idx: Vec<usize> = (0..state.questions.len()).collect();
-        for i in (1..idx.len()).rev() {
-            let j = (r.next() % (i as u64 + 1)) as usize;
-            idx.swap(i, j);
+    match mode.as_str() {
+        "每日挑战" => daily_questions(&state.questions, today.as_deref().unwrap_or("")),
+        "全部" => state.questions.clone(),
+        "错题本" => {
+            let p = state.progress();
+            state
+                .questions
+                .iter()
+                .filter(|q| p.wrong.contains(&q.id))
+                .cloned()
+                .collect()
         }
-        idx.truncate(5);
-        return idx.into_iter().map(|i| state.questions[i].clone()).collect();
+        category => state
+            .questions
+            .iter()
+            .filter(|q| q.category == category)
+            .cloned()
+            .collect(),
     }
-    let p = state.progress.lock().unwrap();
-    state
-        .questions
-        .iter()
-        .filter(|q| match mode.as_str() {
-            "全部" => true,
-            "错题本" => p.wrong.contains(&q.id),
-            c => q.category == c,
-        })
-        .cloned()
-        .collect()
 }
 
 /// combo: 本次作答前的连对数(由前端维护)
@@ -367,31 +569,46 @@ fn submit_answer(
     combo: u32,
     today: String,
 ) -> Result<AnswerResult, String> {
+    require_day(&today)?;
     let q = state
         .questions
         .iter()
         .find(|q| q.id == id)
         .ok_or_else(|| format!("题目 {id} 不存在"))?;
     let correct = choice == q.answer;
+    let combo = combo.min(999);
 
-    let mut p = state.progress.lock().unwrap();
+    let mut p = state.progress();
     let st = p.stats.entry(q.category.clone()).or_default();
-    st.done += 1;
+    st.done = st.done.saturating_add(1);
     let mut cleared = false;
+    let mut removed_from_wrong = false;
     if correct {
-        st.right += 1;
-        cleared = p.wrong.remove(&id) && p.wrong.is_empty();
+        st.right = st.right.saturating_add(1);
+        removed_from_wrong = p.wrong.remove(&id);
+        cleared = removed_from_wrong && p.wrong.is_empty();
     } else {
         p.wrong.insert(id);
     }
 
-    let new_combo = if correct { combo + 1 } else { 0 };
-    let base = if correct { 10 + 2 * (new_combo / 3).min(5) } else { 2 };
+    let new_combo = if correct { combo.saturating_add(1) } else { 0 };
+    let base = if correct {
+        10 + 2 * (new_combo / 3).min(5)
+    } else {
+        2
+    };
     let aw = award(
         &mut p,
         &today,
-        Event { base_xp: base, answers: 1, combo: new_combo, cleared, ..Default::default() },
+        Event {
+            base_xp: base,
+            answers: 1,
+            combo: new_combo,
+            cleared,
+            ..Default::default()
+        },
     );
+    let wrong_left = p.wrong.len();
     state.save(&p);
 
     Ok(AnswerResult {
@@ -400,35 +617,42 @@ fn submit_answer(
         explanation: q.explanation.clone(),
         combo: new_combo,
         award: aw,
+        removed_from_wrong,
+        wrong_left,
     })
 }
 
 /// 完成每日挑战后领取奖励(每天仅一次)
 #[tauri::command]
-fn claim_daily(state: State<AppState>, today: String) -> AwardInfo {
-    let mut p = state.progress.lock().unwrap();
+fn claim_daily(state: State<AppState>, today: String) -> Result<AwardInfo, String> {
+    require_day(&today)?;
+    let mut p = state.progress();
     if p.daily_done == today {
         let level = level_of(p.xp);
-        return AwardInfo {
+        return Ok(AwardInfo {
             level,
-            title: TITLES[(level - 1) as usize],
+            title: title_of(level),
             streak: live_streak(&p, &today),
             ..Default::default()
-        };
+        });
     }
     p.daily_done = today.clone();
     let aw = award(
         &mut p,
         &today,
-        Event { base_xp: DAILY_BONUS, unlock: Some("daily"), ..Default::default() },
+        Event {
+            base_xp: DAILY_BONUS,
+            unlock: Some("daily"),
+            ..Default::default()
+        },
     );
     state.save(&p);
-    aw
+    Ok(aw)
 }
 
 #[tauri::command]
 fn get_stats(state: State<AppState>) -> Progress {
-    state.progress.lock().unwrap().clone()
+    state.progress().clone()
 }
 
 #[derive(Serialize)]
@@ -444,6 +668,7 @@ struct AchvView {
 struct Profile {
     xp: u32,
     level: u32,
+    max_level: u32,
     title: &'static str,
     level_floor: u32,
     level_next: u32,
@@ -458,12 +683,13 @@ struct Profile {
 
 #[tauri::command]
 fn get_profile(state: State<AppState>, today: String) -> Profile {
-    let p = state.progress.lock().unwrap();
+    let p = state.progress();
     let level = level_of(p.xp);
     Profile {
         xp: p.xp,
         level,
-        title: TITLES[(level - 1) as usize],
+        max_level: TITLES.len() as u32,
+        title: title_of(level),
         level_floor: level_floor(level),
         level_next: level_next(level),
         streak: live_streak(&p, &today),
@@ -487,7 +713,7 @@ fn get_profile(state: State<AppState>, today: String) -> Profile {
 
 #[tauri::command]
 fn reset_progress(state: State<AppState>) {
-    let mut p = state.progress.lock().unwrap();
+    let mut p = state.progress();
     *p = Progress::default();
     state.save(&p);
 }
@@ -499,12 +725,16 @@ struct Rng(u64);
 
 impl Rng {
     fn seeded(seed: u64) -> Self {
-        let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(0x1234_5678_9ABC_DEF1) | 1);
+        let mut r = Rng(seed
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(0x1234_5678_9ABC_DEF1)
+            | 1);
         for _ in 0..8 {
             r.next();
         }
         r
     }
+
     fn new() -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -512,6 +742,7 @@ impl Rng {
             .unwrap_or(88172645463325252);
         Rng::seeded(nanos)
     }
+
     fn next(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x << 13;
@@ -520,10 +751,15 @@ impl Rng {
         self.0 = x;
         x
     }
-    /// 闭区间 [lo, hi]
+
+    /// 闭区间 [lo, hi];lo >= hi 时直接返回 lo,避免取模除零。
     fn range(&mut self, lo: i64, hi: i64) -> i64 {
+        if hi <= lo {
+            return lo;
+        }
         lo + (self.next() % (hi - lo + 1) as u64) as i64
     }
+
     fn pick<T: Copy>(&mut self, xs: &[T]) -> T {
         xs[(self.next() % xs.len() as u64) as usize]
     }
@@ -540,7 +776,7 @@ struct DrillInfo {
 struct DrillQ {
     text: String,
     answer: f64,
-    /// 允许误差,整数题为 0
+    /// 允许误差，整数题为 0
     tol: f64,
 }
 
@@ -588,9 +824,9 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
             let a = 20 * r.range(5, 60);
             let p = r.pick(&[5i64, 10, 15, 20, 25, 30, 40, 50]);
             if r.range(0, 1) == 0 {
-                ex(format!("{a} 增长 {p}% 后是多少?"), a * (100 + p) / 100)
+                ex(format!("{a} 增长 {p}% 后是多少？"), a * (100 + p) / 100)
             } else {
-                ex(format!("{a} 下降 {p}% 后是多少?"), a * (100 - p) / 100)
+                ex(format!("{a} 下降 {p}% 后是多少？"), a * (100 - p) / 100)
             }
         }
         "混合" => {
@@ -611,7 +847,11 @@ fn make(kind: &str, r: &mut Rng) -> DrillQ {
         // "加减" 以及未知类型
         _ => {
             let big = r.range(0, 2) == 0;
-            let x = if big { r.range(1000, 9999) } else { r.range(100, 999) };
+            let x = if big {
+                r.range(1000, 9999)
+            } else {
+                r.range(100, 999)
+            };
             let y = r.range(100, 999);
             let (a, b) = if x >= y { (x, y) } else { (y, x) };
             if r.range(0, 1) == 0 {
@@ -637,7 +877,11 @@ fn gen_drill(kind: String, count: u32) -> Vec<DrillQ> {
     let pool: Vec<&str> = DRILLS.iter().skip(1).map(|d| d.0).collect();
     (0..count.clamp(1, 50))
         .map(|_| {
-            let k: &str = if kind == "综合" { r.pick(&pool) } else { &kind };
+            let k: &str = if kind == "综合" {
+                r.pick(&pool)
+            } else {
+                &kind
+            };
             make(k, &mut r)
         })
         .collect()
@@ -651,28 +895,45 @@ fn record_drill(
     right: u32,
     secs: f64,
     today: String,
-) -> DrillResult {
-    let mut p = state.progress.lock().unwrap();
+) -> Result<DrillResult, String> {
+    require_day(&today)?;
+    // 参数由前端提供，做一次边界收敛，避免异常值把统计写坏。
+    let total = total.clamp(1, 50);
+    let right = right.min(total);
+    let secs = if secs.is_finite() && secs >= 0.0 {
+        secs
+    } else {
+        0.0
+    };
+
+    let mut p = state.progress();
     let st = p.drill.entry(kind).or_default();
-    st.runs += 1;
-    st.done += total;
-    st.right += right;
+    st.runs = st.runs.saturating_add(1);
+    st.done = st.done.saturating_add(total);
+    st.right = st.right.saturating_add(right);
     if total >= 5 && right * 10 >= total * 9 && secs > 0.0 {
         let avg = secs / total as f64;
-        if st.best_avg_secs.map_or(true, |b| avg < b) {
+        if st.best_avg_secs.is_none_or(|b| avg < b) {
             st.best_avg_secs = Some(avg);
         }
     }
     let stat = st.clone();
 
-    let base = right * 4 + if total >= 10 && right == total { 30 } else { 0 };
+    let base = right
+        .saturating_mul(4)
+        .saturating_add(if total >= 10 && right == total { 30 } else { 0 });
     let aw = award(
         &mut p,
         &today,
-        Event { base_xp: base, answers: total, drill: Some((total, right, secs)), ..Default::default() },
+        Event {
+            base_xp: base,
+            answers: total,
+            drill: Some((total, right, secs)),
+            ..Default::default()
+        },
     );
     state.save(&p);
-    DrillResult { stat, award: aw }
+    Ok(DrillResult { stat, award: aw })
 }
 
 /* ---------------- 入口 ---------------- */
@@ -683,19 +944,18 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             fs::create_dir_all(&dir)?;
-            let path = dir.join("progress.json");
-
-            let questions: Vec<Question> =
-                serde_json::from_str(include_str!("../questions.json"))?;
-            let progress: Progress = fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default();
+            let questions = load_questions().map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("题库校验失败：{e}"),
+                )
+            })?;
+            let progress = load_progress(&dir);
 
             app.manage(AppState {
                 questions,
                 progress: Mutex::new(progress),
-                path,
+                data_dir: dir,
             });
             Ok(())
         })
@@ -719,54 +979,229 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    #[test]
-    fn drills_are_sane() {
-        let mut r = Rng::new();
-        for (name, _, _) in DRILLS.iter().skip(1) {
-            for _ in 0..500 {
-                let q = make(name, &mut r);
-                assert!(q.answer >= 0.0, "{name}: {}", q.text);
-            }
+    fn sample_question(id: u32) -> Question {
+        Question {
+            id,
+            category: "言语理解".into(),
+            stem: format!("题目 {id}"),
+            options: vec!["甲".into(), "乙".into(), "丙".into(), "丁".into()],
+            answer: 1,
+            explanation: "解析".into(),
         }
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("xingce-test-{tag}-{stamp}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("创建临时目录");
+        dir
+    }
+
+    #[test]
+    fn builtin_question_bank_is_valid() {
+        let qs = load_questions().expect("题库应通过校验");
+        assert!(qs.len() >= 40, "题库应不少于 40 题，当前 {}", qs.len());
+    }
+
+    #[test]
+    fn duplicate_or_bad_questions_are_rejected() {
+        let mut qs = vec![sample_question(1), sample_question(1)];
+        assert!(validate_questions(&qs).unwrap_err().contains("id 重复"));
+
+        qs = vec![sample_question(1)];
+        qs[0].category = "不存在的分类".into();
+        assert!(validate_questions(&qs).unwrap_err().contains("未知分类"));
+
+        qs = vec![sample_question(1)];
+        qs[0].answer = 9;
+        assert!(validate_questions(&qs).unwrap_err().contains("越界"));
+
+        qs = vec![sample_question(1)];
+        qs[0].options.clear();
+        assert!(validate_questions(&qs).is_err());
+    }
+
+    #[test]
+    fn daily_selection_is_stable_per_day() {
+        let qs: Vec<Question> = (1..=20).map(sample_question).collect();
+        let a: Vec<u32> = daily_questions(&qs, "2026-11-09")
+            .iter()
+            .map(|q| q.id)
+            .collect();
+        let b: Vec<u32> = daily_questions(&qs, "2026-11-09")
+            .iter()
+            .map(|q| q.id)
+            .collect();
+        assert_eq!(a, b);
+        assert_eq!(a.len(), DAILY_COUNT);
+        let uniq: BTreeSet<u32> = a.iter().copied().collect();
+        assert_eq!(uniq.len(), DAILY_COUNT);
     }
 
     #[test]
     fn date_math() {
-        assert_eq!(day_num("2026-03-01").unwrap() - day_num("2026-02-28").unwrap(), 1);
-        assert_eq!(day_num("2024-03-01").unwrap() - day_num("2024-02-28").unwrap(), 2);
+        assert_eq!(
+            day_num("2026-03-01").unwrap() - day_num("2026-02-28").unwrap(),
+            1
+        );
+        assert_eq!(
+            day_num("2024-03-01").unwrap() - day_num("2024-02-28").unwrap(),
+            2
+        );
         assert_eq!(day_num("1970-01-01"), Some(0));
+        assert_eq!(day_num("2026-1-1"), None);
+        assert_eq!(day_num("2026-13-01"), None);
+        assert_eq!(day_num("abcd-01-01"), None);
+        assert_eq!(day_num("2026-01-01x"), None);
+        assert!(day_num("2024-02-29").is_some());
+        assert_eq!(day_num("2026-02-29"), None);
+        assert_eq!(day_num("2026-04-31"), None);
     }
 
     #[test]
-    fn levels() {
+    fn levels_and_titles() {
         assert_eq!(level_of(0), 1);
         assert_eq!(level_of(99), 1);
         assert_eq!(level_of(100), 2);
         assert_eq!(level_of(1000), 5);
-        assert_eq!(level_of(u32::MAX / 2), 12);
+        assert_eq!(level_of(u32::MAX), 12);
+        assert_eq!(title_of(1), "见习考生");
+        assert_eq!(title_of(12), "部长");
+        assert_eq!(title_of(99), TITLES[0]);
+        assert_eq!(level_floor(1), 0);
+        assert_eq!(level_next(1), 100);
     }
 
     #[test]
     fn streak_and_freeze() {
         let mut p = Progress::default();
         touch(&mut p, "2026-11-01");
+        touch(&mut p, "2026-11-01"); // 同一天重复活动不重复计数
+        assert_eq!(p.streak, 1);
         touch(&mut p, "2026-11-02");
         assert_eq!(p.streak, 2);
-        touch(&mut p, "2026-11-04"); // 断了一天,无补签卡 → 重置
+        touch(&mut p, "2026-11-04"); // 断了一天，无补签卡 → 重置
         assert_eq!(p.streak, 1);
         p.freezes = 1;
-        touch(&mut p, "2026-11-06"); // 断一天,用补签卡 → 续上
+        touch(&mut p, "2026-11-06"); // 断一天，用补签卡 → 续上
         assert_eq!(p.streak, 2);
         assert_eq!(p.freezes, 0);
+        touch(&mut p, "bad-date"); // 脏日期不应清空连续打卡
+        assert_eq!(p.streak, 2);
     }
 
     #[test]
     fn goal_and_achievements() {
         let mut p = Progress::default();
-        let a = award(&mut p, "2026-11-09", Event { base_xp: 10, answers: DAILY_GOAL, ..Default::default() });
+        let a = award(
+            &mut p,
+            "2026-11-09",
+            Event {
+                base_xp: 10,
+                answers: DAILY_GOAL,
+                ..Default::default()
+            },
+        );
         assert!(a.goal_hit);
         assert_eq!(a.xp, 10 + GOAL_BONUS);
         assert!(p.achv.contains("goal"));
         assert_eq!(a.new_achv.len(), 1);
+        assert_eq!(a.streak, 1);
+
+        // 同一天再结算一次，不重复发放目标奖励
+        let b = award(
+            &mut p,
+            "2026-11-09",
+            Event {
+                base_xp: 10,
+                answers: 1,
+                ..Default::default()
+            },
+        );
+        assert!(!b.goal_hit);
+        assert_eq!(b.xp, 10);
+    }
+
+    #[test]
+    fn xp_saturates_instead_of_overflowing() {
+        let mut p = Progress {
+            xp: u32::MAX,
+            ..Default::default()
+        };
+        let a = award(
+            &mut p,
+            "2026-11-09",
+            Event {
+                base_xp: 100,
+                ..Default::default()
+            },
+        );
+        assert_eq!(p.xp, u32::MAX);
+        assert_eq!(a.level, 12);
+    }
+
+    #[test]
+    fn progress_roundtrip_backup_and_recovery() {
+        let dir = temp_dir("progress");
+        let mut p = Progress {
+            xp: 123,
+            ..Default::default()
+        };
+        save_progress(&dir, &p).expect("首次保存");
+        assert_eq!(load_progress(&dir).xp, 123);
+
+        p.xp = 456;
+        save_progress(&dir, &p).expect("再次保存");
+        assert_eq!(load_progress(&dir).xp, 456);
+        assert_eq!(read_progress(&dir.join(BACKUP_FILE)).unwrap().xp, 123);
+
+        // 主文件损坏：应自动回退到上一次的备份
+        fs::write(progress_path(&dir), "{ 坏掉的 json").unwrap();
+        assert_eq!(load_progress(&dir).xp, 123);
+        assert!(dir.join("progress.corrupt.json").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_progress_without_backup_falls_back_to_default() {
+        let dir = temp_dir("corrupt");
+        fs::write(progress_path(&dir), "not json").unwrap();
+        let p = load_progress(&dir);
+        assert_eq!(p.xp, 0);
+        assert!(p.stats.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drills_are_sane() {
+        let mut r = Rng::new();
+        for (name, _, _) in DRILLS.iter().skip(1) {
+            for _ in 0..500 {
+                let q = make(name, &mut r);
+                assert!(
+                    q.answer.is_finite() && q.answer >= 0.0,
+                    "{name}: {}",
+                    q.text
+                );
+                assert!(q.tol >= 0.0, "{name}: {}", q.text);
+                assert!(!q.text.trim().is_empty(), "{name}: 题干为空");
+            }
+        }
+    }
+
+    #[test]
+    fn rng_range_is_safe_for_degenerate_bounds() {
+        let mut r = Rng::seeded(1);
+        assert_eq!(r.range(5, 5), 5);
+        assert_eq!(r.range(9, 3), 9);
+        for _ in 0..1000 {
+            let v = r.range(10, 20);
+            assert!((10..=20).contains(&v));
+        }
     }
 }

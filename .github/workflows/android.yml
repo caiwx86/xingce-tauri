@@ -3,11 +3,25 @@ name: Build Android APK
 on:
   push:
     branches: [main, master]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -32,23 +46,55 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
+
+      # tauri-cli 编译很慢，单独缓存二进制；缓存命中时跳过 cargo install
+      - name: 缓存 tauri-cli
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-${{ runner.os }}-2
 
       - name: 安装 tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2" --locked
+
+      - name: 格式与静态检查
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: 单元测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: 生成图标并初始化 Android 工程
         run: |
           cargo tauri icon app-icon.png
           cargo tauri android init --ci
 
-      - name: 构建 APK (debug 签名,可直接安装)
+      # Android 工程是 init 之后才生成的，所以缓存步骤放在 init 之后
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('src-tauri/gen/android/**/*.gradle*', 'src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: 构建 APK(debug 签名，可直接安装)
         run: cargo tauri android build --apk --debug --target aarch64 --ci
 
       - uses: actions/upload-artifact@v4
         with:
-          name: xingce-apk
+          name: xingce-apk-debug
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14

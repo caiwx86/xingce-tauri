@@ -1,7 +1,10 @@
 [package]
 name = "xingce"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+rust-version = "1.90"
+description = "行测刷题:题库练习、每日挑战、速算训练与错题本"
+publish = false
 
 [lib]
 name = "xingce_lib"
@@ -14,3 +17,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# 移动端对体积更敏感:单 codegen unit + LTO + 体积优化 + strip
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

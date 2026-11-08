@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+*.tmp
+
+# 前端工具与本地文件
+node_modules/
+dist/
+screenshots/
+ui/_harness.html
+*.log

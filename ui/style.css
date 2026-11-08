@@ -639,6 +639,55 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
 .fact-card .primary { margin-top: 8px; }
 
 .poster-item, .fbody, .fnote, .fexample, .formula .fbody { overflow-wrap: anywhere; }
+#app.tab-open { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px); }
+.glass-tab {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  z-index: 26;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: min(calc(100% - 24px), 620px);
+  padding: 6px;
+  background: rgba(255, 255, 255, .72);
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 24px;
+  box-shadow: 0 14px 38px #10182824;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  transform: translateX(-50%);
+}
+.glass-tab .tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 2px;
+  color: var(--sub);
+  background: transparent;
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+}
+.tab-ico { display: flex; align-items: center; justify-content: center; width: 34px; height: 27px; border-radius: 10px; transition: background .16s, transform .12s; }
+.tab-ico svg { width: 21px; height: 21px; }
+.tab-label { font-size: 10px; font-weight: 600; letter-spacing: .02em; }
+.glass-tab .tab.active { color: var(--primary); }
+.glass-tab .tab.active .tab-ico { background: var(--primary-weak); }
+.glass-tab .tab:active .tab-ico { transform: scale(.9); }
+#app.tab-open + #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 100px); }
+.top-fact { margin: 0 0 14px; }
+@media (prefers-color-scheme: dark) {
+  .glass-tab {
+    background: rgba(25, 28, 36, .72);
+    border-color: rgba(255, 255, 255, .12);
+    box-shadow: 0 14px 38px #00000055;
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-tab { background: var(--card); }
+}
+
 @media (max-width: 360px) {
   #app { padding-left: 14px; padding-right: 14px; }
   h1 { font-size: 24px; }
@@ -646,6 +695,9 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
   .stem { font-size: 16px; }
   .stem-table { padding: 8px 10px; font-size: 13px; }
   .answer-dock { padding-left: 10px; padding-right: 10px; }
+  .glass-tab { width: calc(100% - 12px); padding: 4px; }
+  .tab-label { font-size: 9px; }
+  #app.tab-open { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px); }
 }
 
 @media (max-height: 640px) {

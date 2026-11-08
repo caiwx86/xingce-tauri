@@ -26,9 +26,41 @@ function h(tag, props = {}, ...kids) {
 }
 
 function screen(...kids) {
-  app.classList.remove("dock-open");
+  app.classList.remove("dock-open", "tab-open");
   app.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
   window.scrollTo(0, 0);
+}
+
+function tabIcon(path) {
+  const span = h("span", { class: "tab-ico", "aria-hidden": "true" });
+  span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
+  return span;
+}
+
+function tabBar(active) {
+  const tabs = [
+    ["home", "首页", "M3 10.8 12 3l9 7.8V21h-6v-6H9v6H3z", renderHome],
+    ["learn", "学习", "M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5zM4 19.5A2.5 2.5 0 0 1 6.5 17H20", renderLearn],
+    ["efficiency", "效率", "M4 20V10M10 20V4M16 20v-7M22 20V7", renderEfficiency],
+    ["profile", "我的", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0", renderProfile],
+  ];
+  return h(
+    "nav",
+    { class: "glass-tab", "aria-label": "主导航" },
+    tabs.map(([id, label, path, render]) =>
+      h(
+        "button",
+        {
+          class: "tab" + (active === id ? " active" : ""),
+          type: "button",
+          "aria-current": active === id ? "page" : null,
+          onclick: render,
+        },
+        tabIcon(path),
+        h("span", { class: "tab-label" }, label)
+      )
+    )
+  );
 }
 
 const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "-");
@@ -103,6 +135,35 @@ const FACTS = [
   "树懒一周才下树一次，行动慢是为了节省能量。",
   "数量关系先看选项量级，常能排除一半错误答案。",
   "每天固定时间复习，比随机刷题更容易形成长期记忆。",
+  "先回忆再看答案，比反复阅读更容易发现真正的漏洞。",
+  "错题不要只抄答案，写下错误原因和下次避免的方法。",
+  "每天先做最需要动脑的题目，精力最好时处理难点。",
+  "一次只专注一个知识点，切换太频繁会降低效率。",
+  "学完一个知识点后，用自己的话讲一遍，能讲清楚才算真会。",
+  "做题时先遮住答案，逼自己完整回忆解题步骤。",
+  "把复习分散到多天，比考前一晚集中突击更牢。",
+  "交替练习不同题型，能训练识别题型和选择方法的能力。",
+  "睡前用 5 分钟复盘今天错的题，睡眠会帮助记忆巩固。",
+  "学习前把手机放到够不到的地方，减少一次分心。",
+  "用一个 25 分钟番茄钟开始，先进入状态再谈坚持。",
+  "不想开始时，先告诉自己只做 2 分钟，往往能继续下去。",
+  "错题隔天再做一遍，比当天重复三遍更有价值。",
+  "每周做一次限时模拟，训练考试节奏和取舍能力。",
+  "把大目标拆成今天能完成的小任务，完成感会推动你继续。",
+  "记录每次学习的开始和结束时间，才能看见真实投入。",
+  "学习前喝一点水，轻微脱水也会影响注意力和反应速度。",
+  "久坐后站起来活动 2 分钟，再回来通常更容易专注。",
+  "保证睡眠比多刷一套题更重要，困倦时记忆效率会明显下降。",
+  "资料分析先看单位、年份和问法，再动笔算。",
+  "数量关系先列式再计算，避免边算边猜。",
+  "言语理解先找转折、因果和并列关联词，主旨通常在逻辑节点上。",
+  "判断推理先找结论和论据，再判断选项是加强还是削弱。",
+  "常识判断靠日常积累，零碎时间看几条比集中背更有效。",
+  "公式先理解推导，再背结论；理解过的公式更不容易混。",
+  "计算训练每天 10 分钟，比周末一次刷 100 题更稳。",
+  "复盘 10 道错题，往往比盲目再刷 50 道新题更有收获。",
+  "固定一个学习角落，坐下就开始，减少进入状态的成本。",
+  "把‘今天学多久’改成‘今天完成哪 3 件事’，更容易执行。",
 ];
 
 function factOfDay() {
@@ -253,6 +314,14 @@ async function handleHardwareBack() {
   }
   if (["专注学习", "学习周报", "学习搭子 PK", "PK 结果"].includes(title)) {
     renderEfficiency();
+    return;
+  }
+  if (["题库练习", "公式背诵", "计算训练", "复习计划"].includes(title)) {
+    renderLearn();
+    return;
+  }
+  if (["设置", "动物乐园", "成就墙", "答题记录"].includes(title)) {
+    renderProfile();
     return;
   }
   renderHome();
@@ -678,13 +747,11 @@ async function renderHome() {
   ANIMAL_CACHE = null;
   formulaScope = "all";
 
-  let cats, st, pf, formulas, quests;
+  let st, pf, quests;
   try {
-    [cats, st, pf, formulas, quests] = await Promise.all([
-      call("list_categories"),
+    [st, pf, quests] = await Promise.all([
       call("get_stats"),
       call("get_profile", { today: today() }),
-      call("list_formulas", { today: today() }),
       call("get_daily_quests", { today: today() }),
     ]);
   } catch (err) {
@@ -692,9 +759,7 @@ async function renderHome() {
     return;
   }
   if (!navIsCurrent(token)) return;
-  FORMULAS_CACHE = formulas;
 
-  const totalQ = cats.reduce((a, c) => a + c.count, 0);
   const catDone = Object.values(st.stats || {}).reduce((a, s) => a + (s.done || 0), 0);
   const catRight = Object.values(st.stats || {}).reduce((a, s) => a + (s.right || 0), 0);
   const drillDone = Object.values(st.drill || {}).reduce((a, s) => a + (s.done || 0), 0);
@@ -702,40 +767,30 @@ async function renderHome() {
   const done = catDone + drillDone;
   const right = catRight + drillRight;
   const wrongs = st.wrong?.length || 0;
-  const got = pf.achievement_count;
   const questDone = quests.filter((q) => q.progress >= q.target).length;
   const questReady = quests.filter((q) => q.progress >= q.target && !q.claimed).length;
 
-  const dailyNode = card(
-    "📅 每日挑战",
-    pf.daily_done ? "今日已完成 ✓" : "5 道题 · 额外 +30 XP",
-    () => start("每日挑战"),
-    pf.daily_done ? "" : "hot"
-  );
   const smartNode = card(
     "🧠 智能复习",
     `到期 ${pf.review_due} · 新题 ${pf.new_questions}`,
     () => start("智能复习"),
     pf.review_due > 0 ? "hot" : ""
   );
+  const dailyNode = card(
+    "📅 每日挑战",
+    pf.daily_done ? "今日已完成 ✓" : "5 道题 · 额外 +30 XP",
+    () => start("每日挑战"),
+    pf.daily_done ? "" : "hot"
+  );
   const quickNode = card("⚡ 快速练习", "随机 10 题 · 热身", () =>
     start("全部", { limit: 10, shuffle: true, label: "快速练习" })
   );
-
   const todayNote =
     pf.review_due > 0
       ? `先清 ${pf.review_due} 道到期复习`
       : pf.daily_done
         ? "今日任务已完成，随便练几题保持手感"
         : "完成 20 题即达标";
-
-  const formulaNode = card(
-    "🧠 公式背诵",
-    pf.formula_due
-      ? `${formulas.length} 个公式 · 待复习 ${pf.formula_due}`
-      : `${formulas.length} 个公式 · 背诵 · 实操`,
-    renderFormulaList
-  );
 
   screen(
     h(
@@ -756,6 +811,12 @@ async function renderHome() {
         { class: "icon-btn", type: "button", "aria-label": "设置与提醒", onclick: renderSettings },
         "⚙️"
       )
+    ),
+    h(
+      "div",
+      { class: "fact-card compact top-fact" },
+      h("div", { class: "fact-title" }, "💡 今日学习小知识"),
+      h("p", {}, factOfDay())
     ),
     profileCard(pf),
     h(
@@ -794,37 +855,9 @@ async function renderHome() {
         card("🧮 计算训练", "21 类速算 · 14 个技巧", renderDrillMenu)
       )
     ),
-    section(
-      "学习",
-      "题库 · 公式 · 错题 · 复习",
-      h(
-        "div",
-        { class: "grid2" },
-        card("📚 题库练习", `${totalQ} 题 · 五大分类`, renderLibrary),
-        formulaNode,
-        card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
-        card("🎯 效率中心", `任务 ${questDone}/${quests.length} · 专注/周报/PK`, renderEfficiency)
-      )
-    ),
-    section(
-      "我的",
-      "伙伴 · 成就 · 记录",
-      h(
-        "div",
-        { class: "grid2" },
-        card("🐾 动物乐园", `${pf.animal_count} / ${pf.animal_total} 位伙伴`, renderAnimals),
-        card("🏅 成就", `已解锁 ${got} / ${pf.achievement_total}`, renderAchv),
-        card("📜 历史记录", `${pf.history_count} 条 · 最近答题`, renderHistory),
-        card("⚙️ 设置", "提醒 · 外观 · 数据", renderSettings)
-      )
-    ),
-    h(
-      "div",
-      { class: "fact-card compact" },
-      h("div", { class: "fact-title" }, "🐾 今日小知识"),
-      h("p", {}, factOfDay())
-    )
+    tabBar("home")
   );
+  app.classList.add("tab-open");
 }
 
 async function renderLibrary() {
@@ -850,7 +883,7 @@ async function renderLibrary() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderLearn }, "← 返回"),
       h("span", {}, `${total} 题`)
     ),
     h("h1", {}, "题库练习"),
@@ -875,9 +908,94 @@ async function renderLibrary() {
     h(
       "div",
       { class: "actions" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+      h("button", { class: "link", type: "button", onclick: renderLearn }, "返回学习")
     )
   );
+}
+
+async function renderLearn() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let cats, st, pf, formulas;
+  try {
+    [cats, st, pf, formulas] = await Promise.all([
+      call("list_categories"),
+      call("get_stats"),
+      call("get_profile", { today: today() }),
+      call("list_formulas", { today: today() }),
+    ]);
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+  FORMULAS_CACHE = formulas;
+  const totalQ = cats.reduce((a, c) => a + c.count, 0);
+  const wrongs = st.wrong?.length || 0;
+  const formulaDue = pf.formula_due || 0;
+
+  screen(
+    h("h1", {}, "学习"),
+    h("p", { class: "sub" }, "题库、公式、错题和复习计划都在这里。"),
+    h(
+      "div",
+      { class: "grid2" },
+      card("📚 题库练习", `${totalQ} 题 · 五大分类`, renderLibrary),
+      card(
+        "🧠 公式背诵",
+        formulaDue ? `${formulas.length} 个 · 待复习 ${formulaDue}` : `${formulas.length} 个公式 · 背诵 · 实操`,
+        renderFormulaList,
+        formulaDue > 0 ? "hot" : ""
+      ),
+      card("📕 错题本", `${wrongs} 题 · 答对即移出`, () => start("错题本")),
+      card("📈 复习计划", "艾宾浩斯 · 未来 7 天", renderReviewPlan),
+      card("🧮 计算训练", "21 类速算 · 14 个技巧", renderDrillMenu),
+      card("⚡ 速算技巧", "常用套路 · 背诵手册", renderTrickList)
+    ),
+    tabBar("learn")
+  );
+  app.classList.add("tab-open");
+}
+
+async function renderProfile() {
+  const token = newNav();
+  stopTimer();
+  S = null;
+  D = null;
+  F = null;
+  FC = null;
+  FP = null;
+
+  let pf;
+  try {
+    pf = await call("get_profile", { today: today() });
+  } catch (err) {
+    if (navIsCurrent(token)) renderError(err);
+    return;
+  }
+  if (!navIsCurrent(token)) return;
+
+  screen(
+    h("h1", {}, "我的"),
+    h("p", { class: "sub" }, "收集、成就、记录和设置。"),
+    profileCard(pf),
+    h(
+      "div",
+      { class: "grid2" },
+      card("🐾 动物乐园", `${pf.animal_count} / ${pf.animal_total} 位伙伴`, renderAnimals),
+      card("🏅 成就", `已解锁 ${pf.achievement_count} / ${pf.achievement_total}`, renderAchv),
+      card("📜 历史记录", `${pf.history_count} 条 · 最近答题`, renderHistory),
+      card("⚙️ 设置", "提醒 · 外观 · 数据", renderSettings)
+    ),
+    tabBar("profile")
+  );
+  app.classList.add("tab-open");
 }
 
 function questRow(q, onClaim) {
@@ -933,17 +1051,11 @@ async function renderEfficiency() {
   if (!navIsCurrent(token)) return;
 
   screen(
-    h(
-      "div",
-      { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
-      h("span", {}, `今日专注 ${pf.focus_minutes}/${pf.focus_goal} 分钟`)
-    ),
     h("h1", {}, "效率中心"),
     h("p", { class: "sub" }, "把今天的任务清掉，再用专注和复盘把效率拉满。"),
     section(
       "今日任务",
-      "完成任务领 XP",
+      `今日专注 ${pf.focus_minutes}/${pf.focus_goal} 分钟`,
       h(
         "div",
         { class: "quest-list" },
@@ -962,12 +1074,9 @@ async function renderEfficiency() {
         card("📈 复习计划", "艾宾浩斯曲线 · 未来 7 天", renderReviewPlan)
       )
     ),
-    h(
-      "div",
-      { class: "actions" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
-    )
+    tabBar("efficiency")
   );
+  app.classList.add("tab-open");
 }
 
 const FOCUS_PRESETS = [25, 45, 60];
@@ -1525,7 +1634,7 @@ function renderSettings() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "设置"),
@@ -1578,7 +1687,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.5 · 表格适配 · 图标对齐")
+          h("div", { class: "d" }, "0.9.6 · 学习 Tab · 今日小知识")
         )
       )
     ),
@@ -1625,7 +1734,7 @@ async function renderReviewPlan() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderLearn }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "复习计划"),
@@ -1647,7 +1756,7 @@ async function renderReviewPlan() {
       h("button", { class: "primary", type: "button", onclick: () => start("智能复习") }, "开始智能复习"),
       h("button", { class: "link", type: "button", onclick: startFormulaCards }, "公式背诵卡"),
       h("button", { class: "link", type: "button", onclick: startFormulaPractice }, "公式实操"),
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+      h("button", { class: "link", type: "button", onclick: renderLearn }, "返回学习")
     )
   );
 }
@@ -1719,7 +1828,7 @@ async function renderAchv() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "成就墙"),
@@ -1775,7 +1884,7 @@ async function renderAchv() {
     h(
       "div",
       { class: "actions" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "返回我的")
     )
   );
 }
@@ -1816,7 +1925,7 @@ async function renderAnimals() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "动物乐园"),
@@ -1884,7 +1993,7 @@ async function renderAnimals() {
       "div",
       { class: "actions" },
       h("button", { class: "primary", type: "button", onclick: () => start("智能复习") }, "去刷题找伙伴"),
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "返回我的")
     )
   );
 }
@@ -1942,7 +2051,7 @@ ${item.stem}`
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "答题记录"),
@@ -1988,7 +2097,7 @@ ${item.stem}`
       "div",
       { class: "actions" },
       h("button", { class: "link danger", type: "button", onclick: clearHistory }, "清空答题记录"),
-      h("button", { class: "link", type: "button", onclick: renderHome }, "返回首页")
+      h("button", { class: "link", type: "button", onclick: renderProfile }, "返回我的")
     )
   );
 }
@@ -2077,7 +2186,7 @@ async function renderFormulaList() {
     h(
       "div",
       { class: "bar" },
-      h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"),
+      h("button", { class: "link", type: "button", onclick: renderLearn }, "← 返回"),
       h("span")
     ),
     h("h1", {}, "公式背诵"),
@@ -3169,7 +3278,7 @@ async function renderDrillMenu() {
   }
 
   screen(
-    h("div", { class: "bar" }, h("button", { class: "link", type: "button", onclick: renderHome }, "← 返回"), h("span")),
+    h("div", { class: "bar" }, h("button", { class: "link", type: "button", onclick: renderLearn }, "← 返回"), h("span")),
     h("h1", {}, "计算训练"),
     h("p", { class: "sub" }, "基础速算 + 资料分析专项，按组练习更清晰。"),
     groupSections,

@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "xingce"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "serde",
  "serde_json",

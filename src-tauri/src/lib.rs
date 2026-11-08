@@ -724,7 +724,7 @@ impl AnimalDef {
     }
 }
 
-const EXTRA_ANIMALS: [(&'static str, &'static str); 87] = [
+const EXTRA_ANIMALS: [(&str, &str); 87] = [
     ("浣熊", "🦝"),
     ("仓鼠", "🐹"),
     ("小老鼠", "🐭"),
@@ -956,9 +956,7 @@ fn build_animals() -> Vec<AnimalDef> {
     }
     debug_assert_eq!(conditions.len(), EXTRA_ANIMALS.len());
 
-    for (i, ((name, icon), (kind, target))) in
-        EXTRA_ANIMALS.iter().zip(conditions.into_iter()).enumerate()
-    {
+    for (i, ((name, icon), (kind, target))) in EXTRA_ANIMALS.iter().zip(conditions).enumerate() {
         let (hint, desc) = match kind {
             AnimalKind::Answers => (
                 format!("累计答题 {target} 道"),
@@ -1021,7 +1019,8 @@ fn animal_unlocked_def(def: &AnimalDef, p: &Progress, total: u32, level: u32, ev
     }
 }
 
-/// 兼容按 id 查询解锁状态（测试和旧逻辑使用）
+/// 兼容按 id 查询解锁状态（仅测试使用）
+#[cfg(test)]
 fn animal_unlocked(id: &str, p: &Progress, total: u32, level: u32, ev: &Event) -> bool {
     animal_defs()
         .iter()
@@ -1151,7 +1150,7 @@ fn build_achievements() -> Vec<AchvDef> {
                 &format!("{cat} · {target} 题"),
                 &format!("{cat}累计完成 {target} 题"),
                 "分类",
-                AchvKind::Category(*cat),
+                AchvKind::Category(cat),
                 target,
             ));
         }
@@ -1165,7 +1164,7 @@ fn build_achievements() -> Vec<AchvDef> {
                 &format!("{kind} · {target} 题"),
                 &format!("{kind}累计完成 {target} 题"),
                 "训练",
-                AchvKind::Drill(*kind),
+                AchvKind::Drill(kind),
                 target,
             ));
         }
@@ -1270,7 +1269,7 @@ fn achv_unlocked(def: &AchvDef, p: &Progress, total: u32, level: u32, ev: &Event
         AchvKind::Drill(kind) => p.drill.get(*kind).map(|s| s.done).unwrap_or(0) >= def.target,
         AchvKind::History => p.history.len() as u32 >= def.target,
         AchvKind::Animal(id) => p.animals.contains(id.as_str()),
-        AchvKind::Special(id) => special_unlocked(*id, p, level, ev),
+        AchvKind::Special(id) => special_unlocked(id, p, level, ev),
     }
 }
 

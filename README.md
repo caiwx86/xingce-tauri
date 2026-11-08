@@ -85,6 +85,7 @@ cargo tauri android build --apk --debug --target aarch64 --ci
 - 构建前先跑 `cargo fmt --check`、`cargo clippy -D warnings` 和单元测试
 - 同一分支的新构建会取消尚未完成的旧构建
 - 固定签名：从 GitHub Secrets 读取同一把 upload key，保证每次构建的 APK 可以覆盖安装
+- 构建后自动执行 `apksigner verify`，签名异常时直接失败，不上传坏包
 
 ### 固定 APK 签名
 

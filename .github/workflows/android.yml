@@ -138,6 +138,14 @@ jobs:
         if: steps.signing.outputs.enabled != 'true'
         run: cargo tauri android build --apk --debug --target aarch64 --ci
 
+      - name: 校验 APK 签名
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)
+          test -n "$APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$APKSIGNER" verify --print-certs "$APK"
+
       - uses: actions/upload-artifact@v4
         with:
           name: xingce-apk

@@ -26,6 +26,7 @@ function h(tag, props = {}, ...kids) {
 }
 
 function screen(...kids) {
+  app.classList.remove("dock-open");
   app.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
   window.scrollTo(0, 0);
 }
@@ -1491,7 +1492,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.1 · 内置键盘反馈修复")
+          h("div", { class: "d" }, "0.9.2 · 底部键盘 · 单手模式")
         )
       )
     ),
@@ -2564,7 +2565,6 @@ function renderFormulaPracticeQ() {
   });
   const pad = numberPad(input, submitFormulaPractice);
   const fb = h("div", { class: "fb", "aria-live": "polite" });
-  const submit = h("button", { class: "primary", type: "button", onclick: submitFormulaPractice }, "确定");
   const next = h(
     "button",
     { class: "primary hidden", type: "button", onclick: nextFormulaPractice },
@@ -2582,7 +2582,7 @@ function renderFormulaPracticeQ() {
     if (FP && FP.done && FP.ready) nextFormulaPractice();
     else if (FP && !FP.done) submitFormulaPractice();
   });
-  FP.ui = { input, pad, fb, submit, next, q };
+  FP.ui = { input, pad, fb, next, q };
 
   screen(
     h(
@@ -2616,13 +2616,17 @@ function renderFormulaPracticeQ() {
     ),
     h("span", { class: "tag" }, `公式实操 · ${q.title}`),
     h("div", { class: "big-q" }, q.text),
-    input,
-    pad.node,
-    fb,
-    submit,
-    next,
-    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，确定/Enter 提交，Esc 退出")
+    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，确定/Enter 提交，Esc 退出"),
+    h(
+      "div",
+      { class: "answer-dock" },
+      input,
+      pad.node,
+      fb,
+      next
+    )
   );
+  app.classList.add("dock-open");
   requestAnimationFrame(() => input.focus());
 }
 
@@ -2652,7 +2656,6 @@ async function submitFormulaPractice() {
     FP.ui.fb.className = "fb bad";
   }
   FP.ui.input.readOnly = true;
-  FP.ui.submit.classList.add("hidden");
 
   try {
     await call("record_formula", { id: q.id, correct, today: today() });
@@ -3240,7 +3243,6 @@ function renderDrillQ() {
   });
   const pad = numberPad(input, submitDrill);
   const fb = h("div", { class: "fb", "aria-live": "polite" });
-  const ok = h("button", { class: "primary", type: "button", onclick: submitDrill }, "确定");
   const nextBtn = h("button", { class: "primary hidden", type: "button", onclick: nextDrill }, last ? "查看结果" : "下一题");
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -3253,7 +3255,7 @@ function renderDrillQ() {
     if (D.answered) nextDrill();
     else submitDrill();
   });
-  D.ui = { input, pad, fb, ok, nextBtn, q };
+  D.ui = { input, pad, fb, nextBtn, q };
 
   screen(
     h(
@@ -3276,13 +3278,17 @@ function renderDrillQ() {
       h("i", { style: `width:${((D.i + 1) / D.qs.length) * 100}%` })
     ),
     h("div", { class: "big-q" }, q.text),
-    input,
-    pad.node,
-    fb,
-    ok,
-    nextBtn,
-    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，Enter 提交 / 下一题，Esc 退出")
+    h("p", { class: "kbd-hint" }, "使用下方数字键盘输入，确定/Enter 提交，Esc 退出"),
+    h(
+      "div",
+      { class: "answer-dock" },
+      input,
+      pad.node,
+      fb,
+      nextBtn
+    )
   );
+  app.classList.add("dock-open");
   requestAnimationFrame(() => input.focus());
   startClock();
 }
@@ -3325,7 +3331,6 @@ function submitDrill() {
   D.answered = true;
   D.spent += Math.max(0, Date.now() - D.qStart);
   D.ui.input.readOnly = true;
-  D.ui.ok.classList.add("hidden");
   D.ui.pad.setEnabled(false);
 
   if (Math.abs(mine - q.answer) <= q.tol + 1e-9) {

@@ -246,6 +246,25 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
   50% { transform: translateX(5px); }
   75% { transform: translateX(-3px); }
 }
+#app.dock-open { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 360px); }
+.answer-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 30;
+  width: min(100%, 680px);
+  padding: 9px 20px calc(env(safe-area-inset-bottom, 0px) + 9px);
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  border-radius: 22px 22px 0 0;
+  box-shadow: 0 -12px 34px #10182818;
+  transform: translateX(-50%);
+}
+.answer-dock .ans { padding: 7px 10px; font-size: 26px; border-radius: 13px; }
+.answer-dock .keypad { margin: 7px 0 0; gap: 7px; }
+.answer-dock .keypad .key { min-height: 44px; border-radius: 13px; }
+.answer-dock .fb { min-height: 22px; margin-top: 4px; font-size: 16px; }
+.answer-dock .primary { width: 100%; min-height: 44px; margin-top: 4px; }
 .keypad {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -360,6 +379,7 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
   pointer-events: none;
 }
 #toast.show { opacity: 1; }
+#app.dock-open + #toast { bottom: calc(env(safe-area-inset-bottom, 0px) + 365px); }
 
 /* ---------- 首页分区 / 设置 / 公式 ---------- */
 .home-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -582,6 +602,22 @@ h1 { margin: 8px 0 0; font-size: 28px; letter-spacing: -0.03em; line-height: 1.2
 .pk-score span { color: var(--sub); font-size: 12px; }
 .pk-score .vs { color: var(--sub); font-size: 13px; }
 .fact-card .primary { margin-top: 8px; }
+
+@media (max-height: 640px) {
+  .answer-dock { padding-top: 6px; }
+  .answer-dock .ans { padding: 5px 8px; font-size: 22px; }
+  .answer-dock .keypad { margin-top: 5px; gap: 6px; }
+  .answer-dock .keypad .key { min-height: 38px; font-size: 18px; }
+  #app.dock-open { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 315px); }
+}
+@media (max-width: 480px) {
+  .answer-dock { padding-left: 14px; padding-right: 14px; }
+  .answer-dock .keypad .key { min-height: 42px; font-size: 20px; }
+  #app.dock-open { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 345px); }
+}
+@media (min-width: 700px) {
+  .answer-dock { bottom: 10px; border-radius: 22px; }
+}
 
 @media (min-width: 700px) {
   .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

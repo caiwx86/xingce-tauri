@@ -1248,6 +1248,14 @@ function pkTick() {
   if (PK.remaining <= 0) finishPK(null);
 }
 
+function stemNode(text) {
+  const raw = String(text);
+  if (!raw.includes("\n")) return h("p", { class: "stem" }, text);
+  const tableLike = raw.includes("年份") || /\S {2,}\S/.test(raw);
+  if (tableLike) return h("pre", { class: "stem stem-table" }, text);
+  return h("p", { class: "stem stem-multiline" }, text);
+}
+
 async function renderPK() {
   const token = newNav();
   stopTimer();
@@ -1304,7 +1312,7 @@ async function renderPK() {
     h("h1", {}, "学习搭子 PK"),
     h("p", { class: "sub" }, "30 秒内答对得基础分，答得越快加分越多。对手是离线学习搭子。"),
     h("div", { class: "pk-bot" }, "🐾 学习搭子已就位，准备好了吗？"),
-    h("p", { class: "stem" }, q.stem),
+    stemNode(q.stem),
     h("div", { class: "opts", role: "group", "aria-label": "PK 选项" }, opts),
     h("p", { class: "kbd-hint" }, "按 1–4 作答；超时视为放弃本题。")
   );
@@ -1570,7 +1578,7 @@ function renderSettings() {
           "div",
           {},
           h("div", { class: "t" }, "版本"),
-          h("div", { class: "d" }, "0.9.4 · 反馈置顶 · 返回键导航")
+          h("div", { class: "d" }, "0.9.5 · 表格适配 · 图标对齐")
         )
       )
     ),
@@ -2926,7 +2934,7 @@ function renderQ() {
       h("i", { style: `width:${((S.i + 1) / S.qs.length) * 100}%` })
     ),
     h("span", { class: "tag" }, S.mode === "每日挑战" ? "每日挑战 · " + q.category : q.category),
-    h("p", { class: "stem" }, q.stem),
+    stemNode(q.stem),
     h("div", { class: "opts", role: "group", "aria-label": "选项", "data-qid": q.id }, opts),
     exp,
     next,
